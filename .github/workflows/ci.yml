@@ -4,7 +4,7 @@ on:
   pull_request:
 
 jobs:
-  typecheck:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,3 +13,4 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run type-check
+      - run: npm run build-check
