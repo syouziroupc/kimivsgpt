@@ -1,6 +1,6 @@
 {
   "name": "kimi-vs-gpt-auditor",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Compact external pre-answer critique for complex ChatGPT and Codex tasks.",
   "repository": "https://github.com/syouziroupc/kimivsgpt",
   "keywords": ["review", "critic", "reasoning", "verification"],
