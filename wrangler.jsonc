@@ -5,6 +5,20 @@
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
   "ai": { "binding": "AI" },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTH_STATE",
+        "class_name": "AuthState"
+      }
+    ]
+  },
+  "exports": {
+    "AuthState": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
   "ratelimits": [
     {
       "name": "AUDIT_RATE_LIMITER",
@@ -15,6 +29,11 @@
       "name": "DEEP_RATE_LIMITER",
       "namespace_id": "94117002",
       "simple": { "limit": 3, "period": 60 }
+    },
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "94117003",
+      "simple": { "limit": 10, "period": 60 }
     }
   ],
   "observability": { "enabled": true }
