@@ -2,5 +2,14 @@
   "name": "kimi-vs-gpt-auditor",
   "version": "0.2.0",
   "description": "Compact external pre-answer critique for complex ChatGPT and Codex tasks.",
-  "skills": "./skills/"
+  "repository": "https://github.com/syouziroupc/kimivsgpt",
+  "keywords": ["review", "critic", "reasoning", "verification"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Answer Auditor",
+    "shortDescription": "Independent compact review before complex answers",
+    "longDescription": "Reviews a compressed proposed answer direction for anchoring, unsupported assumptions, missing alternatives, stale facts, constraint violations, and overconfidence without delegating the underlying task.",
+    "category": "Productivity",
+    "capabilities": ["Read"]
+  }
 }
