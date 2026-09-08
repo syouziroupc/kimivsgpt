@@ -1,6 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
+import { AuthState, OAUTH_SCOPE } from "./auth";
+
+export { AuthState };
 
 interface RateLimitBinding {
   limit(input: { key: string }): Promise<{ success: boolean }>;
@@ -10,18 +13,25 @@ interface Env {
   AI: {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
+  AUTH_STATE: any;
   AUDIT_RATE_LIMITER?: RateLimitBinding;
   DEEP_RATE_LIMITER?: RateLimitBinding;
+  AUTH_RATE_LIMITER?: RateLimitBinding;
   AUDITOR_MODEL_STANDARD?: string;
   AUDITOR_MODEL_DEEP?: string;
   AUDITOR_ACCESS_KEY?: string;
+  OWNER_AUTH_SECRET?: string;
+  AUDITOR_DAILY_STANDARD_LIMIT?: string;
+  AUDITOR_DAILY_DEEP_LIMIT?: string;
   OPENAI_APPS_CHALLENGE?: string;
 }
 
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
+const DEFAULT_DAILY_STANDARD_LIMIT = 100;
+const DEFAULT_DAILY_DEEP_LIMIT = 5;
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -165,6 +175,35 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function parsePositiveInt(value: string | undefined, fallback: number, max: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+}
+
+function getAuthState(env: Env): any {
+  return env.AUTH_STATE.getByName("owner");
+}
+
+function originOf(request: Request): string {
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+function mcpResource(origin: string): string {
+  return `${origin}/mcp`;
+}
+
+async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+  const standardLimit = parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
+  const deepLimit = parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 1000);
+  const limit = level === "deep" ? deepLimit : standardLimit;
+  const result = await getAuthState(env).consumeUsage(level, limit);
+  if (!result.allowed) {
+    throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+  }
+}
+
 async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
   const input = {
     messages: [
@@ -189,25 +228,9 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
     throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
   }
 
-  try {
-    return await invokeModel(env, selected, serialized);
-  } catch (error) {
-    if (packet.review_level === "deep" && selected !== standard) {
-      return invokeModel(env, standard, serialized);
-    }
-    throw error;
-  }
-}
-
-function isAuthorized(request: Request, env: Env): boolean {
-  const expected = env.AUDITOR_ACCESS_KEY;
-  if (!expected) return true;
-
-  const bearer = request.headers.get("authorization");
-  if (bearer === `Bearer ${expected}`) return true;
-
-  const key = new URL(request.url).searchParams.get("key");
-  return key === expected;
+  // Reserve exactly one daily budget unit before the model call. No automatic model retry/fallback.
+  await consumeDailyBudget(env, packet.review_level);
+  return invokeModel(env, selected, serialized);
 }
 
 function reviewCallLevel(value: unknown): "standard" | "deep" | null {
@@ -249,6 +272,282 @@ async function enforceReviewRateLimit(request: Request, env: Env): Promise<Respo
   );
 }
 
+function jsonWithCors(value: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Content-Type", "application/json; charset=utf-8");
+  headers.set("Cache-Control", "no-store");
+  return new Response(JSON.stringify(value), { ...init, headers });
+}
+
+function oauthError(error: string, description: string, status = 400): Response {
+  return jsonWithCors({ error, error_description: description }, { status });
+}
+
+function protectedResourceMetadata(origin: string): Record<string, unknown> {
+  return {
+    resource: mcpResource(origin),
+    authorization_servers: [origin],
+    scopes_supported: [OAUTH_SCOPE],
+    bearer_methods_supported: ["header"],
+    resource_name: "Kimi vs GPT Answer Auditor",
+  };
+}
+
+function authorizationServerMetadata(origin: string): Record<string, unknown> {
+  return {
+    issuer: origin,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/oauth/token`,
+    registration_endpoint: `${origin}/oauth/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+    scopes_supported: [OAUTH_SCOPE],
+    client_id_metadata_document_supported: false,
+  };
+}
+
+function oauthUnauthorized(origin: string): Response {
+  const metadata = `${origin}/.well-known/oauth-protected-resource`;
+  return new Response("Unauthorized", {
+    status: 401,
+    headers: {
+      "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function sha256Bytes(value: string): Promise<Uint8Array> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return new Uint8Array(digest);
+}
+
+async function constantTimeSecretEqual(input: string, expected: string): Promise<boolean> {
+  const [a, b] = await Promise.all([sha256Bytes(input), sha256Bytes(expected)]);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function validateAuthorizeParams(env: Env, params: URLSearchParams, origin: string): Promise<{
+  client_id: string;
+  redirect_uri: string;
+  code_challenge: string;
+  scope: string;
+  resource: string;
+  state: string;
+}> {
+  const clientId = params.get("client_id") ?? "";
+  const redirectUri = params.get("redirect_uri") ?? "";
+  const responseType = params.get("response_type") ?? "";
+  const challenge = params.get("code_challenge") ?? "";
+  const method = params.get("code_challenge_method") ?? "";
+  const requestedScope = params.get("scope") ?? OAUTH_SCOPE;
+  const resource = params.get("resource") ?? mcpResource(origin);
+  const state = params.get("state") ?? "";
+
+  if (!clientId || !redirectUri || responseType !== "code") throw new Error("invalid_request");
+  if (!challenge || method !== "S256") throw new Error("pkce_s256_required");
+  if (!requestedScope.split(/\s+/).includes(OAUTH_SCOPE)) throw new Error("invalid_scope");
+  if (resource !== mcpResource(origin)) throw new Error("invalid_target");
+
+  const client = await getAuthState(env).getClient(clientId);
+  if (!client || !client.redirect_uris.includes(redirectUri)) throw new Error("invalid_client_or_redirect_uri");
+
+  return {
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    scope: OAUTH_SCOPE,
+    resource,
+    state,
+  };
+}
+
+function renderOwnerLogin(params: Record<string, string>, errorMessage = ""): Response {
+  const hidden = Object.entries(params)
+    .map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`)
+    .join("\n");
+  const error = errorMessage ? `<p class="error">${escapeHtml(errorMessage)}</p>` : "";
+  const html = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kimi vs GPT 認証</title><style>
+body{font-family:system-ui,sans-serif;max-width:520px;margin:64px auto;padding:0 20px;color:#171717}main{border:1px solid #ddd;border-radius:14px;padding:24px}label{display:block;margin:16px 0 8px}input[type=password]{box-sizing:border-box;width:100%;padding:12px;border:1px solid #aaa;border-radius:8px}button{margin-top:18px;padding:11px 18px;border:0;border-radius:8px;background:#111;color:white;font-weight:600}.error{color:#b42318}small{color:#666}</style></head>
+<body><main><h1>Kimi vs GPT</h1><p>所有者専用の監査AI接続です。</p>${error}<form method="post" action="/oauth/authorize">${hidden}<label for="owner_secret">Owner passphrase</label><input id="owner_secret" name="owner_secret" type="password" autocomplete="current-password" required autofocus><button type="submit">認証して接続</button></form><p><small>パスフレーズはこの認証処理以外には使用されません。</small></p></main></body></html>`;
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
+}
+
+async function handleOAuthRegister(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json() as Record<string, unknown>;
+  } catch {
+    return oauthError("invalid_client_metadata", "Request body must be JSON.");
+  }
+
+  const redirectUris = Array.isArray(body.redirect_uris)
+    ? body.redirect_uris.map(String)
+    : [];
+  const responseTypes = Array.isArray(body.response_types) ? body.response_types.map(String) : ["code"];
+  const grantTypes = Array.isArray(body.grant_types) ? body.grant_types.map(String) : ["authorization_code", "refresh_token"];
+  if (!responseTypes.includes("code") || !grantTypes.includes("authorization_code")) {
+    return oauthError("invalid_client_metadata", "Authorization Code flow is required.");
+  }
+
+  try {
+    const client = await getAuthState(env).registerClient({
+      client_name: typeof body.client_name === "string" ? body.client_name : "MCP Client",
+      redirect_uris: redirectUris,
+      token_endpoint_auth_method: typeof body.token_endpoint_auth_method === "string" ? body.token_endpoint_auth_method : "none",
+      application_type: typeof body.application_type === "string" ? body.application_type : "native",
+    });
+    return jsonWithCors({
+      client_id: client.client_id,
+      client_id_issued_at: Math.floor(client.created_at / 1000),
+      client_name: client.client_name,
+      redirect_uris: client.redirect_uris,
+      token_endpoint_auth_method: "none",
+      application_type: client.application_type,
+      response_types: ["code"],
+      grant_types: ["authorization_code", "refresh_token"],
+    }, { status: 201 });
+  } catch (error) {
+    return oauthError("invalid_client_metadata", errorText(error));
+  }
+}
+
+async function handleOAuthAuthorize(request: Request, env: Env, origin: string): Promise<Response> {
+  if (!env.OWNER_AUTH_SECRET) {
+    return new Response("Owner OAuth is not configured yet.", { status: 503 });
+  }
+
+  if (request.method === "GET") {
+    try {
+      const url = new URL(request.url);
+      const validated = await validateAuthorizeParams(env, url.searchParams, origin);
+      return renderOwnerLogin(validated);
+    } catch (error) {
+      return new Response(`Invalid authorization request: ${errorText(error)}`, { status: 400 });
+    }
+  }
+
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+
+  if (env.AUTH_RATE_LIMITER) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const { success } = await env.AUTH_RATE_LIMITER.limit({ key: `owner-login:${ip}` });
+    if (!success) return new Response("Too many authentication attempts.", { status: 429, headers: { "Retry-After": "60" } });
+  }
+
+  const form = await request.formData();
+  const params = new URLSearchParams();
+  for (const key of ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "scope", "resource", "state"]) {
+    const value = form.get(key);
+    if (typeof value === "string") params.set(key, value);
+  }
+
+  let validated;
+  try {
+    validated = await validateAuthorizeParams(env, params, origin);
+  } catch (error) {
+    return new Response(`Invalid authorization request: ${errorText(error)}`, { status: 400 });
+  }
+
+  const supplied = String(form.get("owner_secret") ?? "");
+  const ok = await constantTimeSecretEqual(supplied, env.OWNER_AUTH_SECRET);
+  if (!ok) return renderOwnerLogin(validated, "認証に失敗しました。" );
+
+  const code = await getAuthState(env).createAuthorizationCode({
+    client_id: validated.client_id,
+    redirect_uri: validated.redirect_uri,
+    code_challenge: validated.code_challenge,
+    scope: validated.scope,
+    resource: validated.resource,
+  });
+  const redirect = new URL(validated.redirect_uri);
+  redirect.searchParams.set("code", code);
+  if (validated.state) redirect.searchParams.set("state", validated.state);
+  // RFC 9207 issuer identification; 2026 MCP clients validate this value.
+  redirect.searchParams.set("iss", origin);
+  return Response.redirect(redirect.toString(), 302);
+}
+
+async function handleOAuthToken(request: Request, env: Env, origin: string): Promise<Response> {
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(await request.text());
+  } catch {
+    return oauthError("invalid_request", "Unable to parse token request.");
+  }
+  const grantType = params.get("grant_type") ?? "";
+  const clientId = params.get("client_id") ?? "";
+  const resource = params.get("resource") ?? mcpResource(origin);
+  if (!clientId || resource !== mcpResource(origin)) return oauthError("invalid_request", "Invalid client or resource.");
+  const client = await getAuthState(env).getClient(clientId);
+  if (!client) return oauthError("invalid_client", "Unknown client.", 401);
+
+  try {
+    if (grantType === "authorization_code") {
+      const redirectUri = params.get("redirect_uri") ?? "";
+      if (!client.redirect_uris.includes(redirectUri)) throw new Error("invalid_grant");
+      const tokens = await getAuthState(env).exchangeAuthorizationCode({
+        code: params.get("code") ?? "",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_verifier: params.get("code_verifier") ?? "",
+        resource,
+      });
+      return jsonWithCors(tokens, { headers: { "Pragma": "no-cache" } });
+    }
+    if (grantType === "refresh_token") {
+      const tokens = await getAuthState(env).refreshAccessToken({
+        refresh_token: params.get("refresh_token") ?? "",
+        client_id: clientId,
+        resource,
+      });
+      return jsonWithCors(tokens, { headers: { "Pragma": "no-cache" } });
+    }
+    return oauthError("unsupported_grant_type", "Only authorization_code and refresh_token are supported.");
+  } catch (error) {
+    const message = errorText(error);
+    return oauthError(message === "invalid_target" ? "invalid_target" : "invalid_grant", "Token exchange failed.");
+  }
+}
+
+async function isMcpAuthorized(request: Request, env: Env, origin: string): Promise<boolean> {
+  const header = request.headers.get("authorization") ?? "";
+  if (!header.startsWith("Bearer ")) return false;
+  const token = header.slice(7).trim();
+  if (!token) return false;
+
+  // Break-glass service token for deployment smoke tests. Never put it in plugin manifests or URLs.
+  if (env.AUDITOR_ACCESS_KEY && token === env.AUDITOR_ACCESS_KEY) return true;
+  return Boolean(await getAuthState(env).validateAccessToken(token, mcpResource(origin)));
+}
+
 function createServer(env: Env) {
   const server = new McpServer({ name: "kimi-vs-gpt-auditor", version: VERSION });
 
@@ -282,6 +581,30 @@ function createServer(env: Env) {
 export default {
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
+    const origin = originOf(request);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Protocol-Version",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        },
+      });
+    }
+
+    if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+      return jsonWithCors(protectedResourceMetadata(origin));
+    }
+
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      return jsonWithCors(authorizationServerMetadata(origin));
+    }
+
+    if (url.pathname === "/oauth/register") return handleOAuthRegister(request, env);
+    if (url.pathname === "/oauth/authorize") return handleOAuthAuthorize(request, env, origin);
+    if (url.pathname === "/oauth/token") return handleOAuthToken(request, env, origin);
 
     if (url.pathname === "/.well-known/openai-apps-challenge") {
       const token = env.OPENAI_APPS_CHALLENGE;
@@ -299,12 +622,17 @@ export default {
         standard_model: env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL,
         deep_model: env.AUDITOR_MODEL_DEEP || DEEP_MODEL,
         max_packet_chars: MAX_PACKET_CHARS,
-        rate_limits: { standard_per_minute: 30, deep_per_minute: 3 },
+        oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256" },
+        rate_limits: { standard_per_minute: 30, deep_per_minute: 3, auth_attempts_per_minute_per_ip: 10 },
+        daily_limits: {
+          standard: parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000),
+          deep: parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 1000),
+        },
       });
     }
 
     if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
-    if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+    if (!(await isMcpAuthorized(request, env, origin))) return oauthUnauthorized(origin);
 
     const rateLimited = await enforceReviewRateLimit(request, env);
     if (rateLimited) return rateLimited;
