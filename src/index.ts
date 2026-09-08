@@ -196,7 +196,7 @@ function mcpResource(origin: string): string {
 
 async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
   const standardLimit = parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
-  const deepLimit = parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 1000);
+  const deepLimit = parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5);
   const limit = level === "deep" ? deepLimit : standardLimit;
   const result = await getAuthState(env).consumeUsage(level, limit);
   if (!result.allowed) {
@@ -570,13 +570,14 @@ function createServer(env: Env) {
     {
       description: "Give one compact independent critique of a proposed answer direction before a complex factual, analytical, research, troubleshooting, planning, recommendation, comparison, coding-plan, or consequential judgment answer. Never solve the underlying task or write code.",
       inputSchema: packetSchema,
+      outputSchema: resultSchema,
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async (input) => {
       try {
         const packet = packetSchema.parse(input);
         const audit = await runReview(env, packet);
-        return { content: [{ type: "text" as const, text: JSON.stringify(audit) }] };
+        return { structuredContent: audit, content: [{ type: "text" as const, text: JSON.stringify(audit) }] };
       } catch (error) {
         return {
           isError: true,
@@ -640,7 +641,7 @@ export default {
         rate_limits: { standard_per_minute: 30, deep_per_minute: 3, auth_attempts_per_minute_per_ip: 10 },
         daily_limits: {
           standard: parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000),
-          deep: parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 1000),
+          deep: parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5),
         },
       });
     }
