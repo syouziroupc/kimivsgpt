@@ -1,20 +1,20 @@
 {
   "name": "kimi-vs-gpt-auditor",
-  "version": "0.4.0",
-  "description": "Compact independent review before complex ChatGPT and Codex answers.",
+  "version": "0.5.3",
+  "description": "Automatically runs a compact independent review before complex ChatGPT and Codex answers.",
   "author": {
     "name": "syouziroupc",
     "url": "https://github.com/syouziroupc"
   },
   "homepage": "https://github.com/syouziroupc/kimivsgpt",
   "repository": "https://github.com/syouziroupc/kimivsgpt",
-  "keywords": ["review", "critic", "reasoning", "verification", "second-opinion", "quality-control"],
+  "keywords": ["review", "critic", "reasoning", "verification", "second-opinion", "quality-control", "automatic-review"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kimi vs GPT Answer Auditor",
-    "shortDescription": "Compact second opinion before complex answers",
-    "longDescription": "Adds a compact independent pre-answer review for complex analysis, research, troubleshooting, planning, recommendations, comparisons, and architecture decisions. The external critic is deliberately restricted to brief objections and verification requests; it does not draft the final answer, perform the primary research, or generate complete code.",
+    "shortDescription": "Automatic second opinion before complex answers",
+    "longDescription": "Automatically adds one compact independent pre-answer review for complex analysis, research, troubleshooting, planning, recommendations, comparisons, and architecture decisions. Standard review is used for ordinary complex work; deep Kimi review is reserved for high-stakes, unusually disputed, weak-evidence, or explicitly rigorous tasks. The external critic does not draft the final answer, perform the primary research, or generate complete code.",
     "developerName": "syouziroupc",
     "category": "Productivity",
     "capabilities": ["Read"],
