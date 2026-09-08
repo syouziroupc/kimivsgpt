@@ -2,7 +2,7 @@
 
 A compact second-opinion layer for complex ChatGPT/Codex answers.
 
-The primary model still researches, reasons, writes, and codes. This project only gives it a short independent critique before the final answer, aimed at reducing anchoring and unsupported conclusions without paying for a second full solution.
+The primary model still researches, reasons, writes, and codes. This project gives it one short independent critique before the final answer, aimed at reducing anchoring and unsupported conclusions without paying for a second full solution.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ The primary model still researches, reasons, writes, and codes. This project onl
 2. The plugin calls the Cloudflare Worker over MCP (`/mcp`).
 3. Standard review uses GLM-5.3 Flash.
 4. High-stakes review can explicitly use Kimi K2.6.
-5. The critic returns at most four short issues; it never writes the final answer or code.
+5. The critic returns at most three short issues; it never writes the final answer or code.
 6. The primary model checks those objections against evidence and finalizes its own answer.
 
 ## Cost controls
@@ -18,11 +18,12 @@ The primary model still researches, reasons, writes, and codes. This project onl
 - Standard model: `@cf/zai-org/glm-5.3-flash`.
 - Deep model: `@cf/moonshotai/kimi-k2.6`.
 - `deep` is reserved for materially high-stakes or unusually disputed decisions.
-- Completion cap: 500 tokens.
-- Review packet hard cap: 7,000 characters.
+- Completion cap: 420 tokens.
+- Review packet hard cap: 5,000 characters.
 - Individual input fields also have strict size limits.
 - One review call per substantive answer by default.
 - No transcript dumps, codebase dumps, or delegated coding/research.
+- Standard review requests plain compact JSON and validates it locally, avoiding dependence on JSON Mode support and avoiding a format-related retry.
 
 Cloudflare model overrides are available through Worker environment variables:
 
@@ -34,6 +35,7 @@ Cloudflare model overrides are available through Worker environment variables:
 ```bash
 npm install
 npm run type-check
+npm run build-check
 npm run dev
 ```
 
@@ -72,7 +74,7 @@ This key guard is useful for controlled testing, but the production target shoul
 
 ## GitHub Actions
 
-- `ci.yml` installs dependencies and runs TypeScript checks on pushes/PRs.
+- `ci.yml` installs dependencies, runs TypeScript checks, and performs a Wrangler `deploy --dry-run` bundle validation on pushes/PRs.
 - `deploy.yml` is manual only and deploys with the Cloudflare repository secrets above.
 
 ## Plugin behavior
