@@ -4,6 +4,14 @@ A compact second-opinion layer for complex ChatGPT/Codex answers.
 
 The primary model still researches, reasons, writes, and codes. This project gives it one short independent critique before the final answer, aimed at reducing anchoring and unsupported conclusions without paying for a second full solution.
 
+## Live deployment
+
+- Worker: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev`
+- MCP: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp`
+- Current Worker version: `0.3.1`
+- Cloudflare deployment version ID: `e2622702-c105-4490-9660-ff8b2f5487d6`
+- End-to-end verified: health, MCP initialize, tools/list, and a real `review_strategy` Workers AI call.
+
 ## Architecture
 
 1. ChatGPT/Codex prepares a compressed review packet.
@@ -18,12 +26,13 @@ The primary model still researches, reasons, writes, and codes. This project giv
 - Standard model: `@cf/zai-org/glm-5.3-flash`.
 - Deep model: `@cf/moonshotai/kimi-k2.6`.
 - `deep` is reserved for materially high-stakes or unusually disputed decisions.
-- Completion cap: 420 tokens.
+- Completion cap: 360 tokens.
 - Review packet hard cap: 5,000 characters.
-- Individual input fields also have strict size limits.
+- Individual input fields have strict size limits.
 - One review call per substantive answer by default.
-- No transcript dumps, codebase dumps, or delegated coding/research.
-- Standard review requests plain compact JSON and validates it locally, avoiding dependence on JSON Mode support and avoiding a format-related retry.
+- No transcript dumps, codebase dumps, delegated coding, research, or replacement answers.
+- Standard review uses one model call. Minor output-schema variation is normalized locally rather than retried.
+- Kimi is not used merely because a task is long.
 
 Cloudflare model overrides are available through Worker environment variables:
 
@@ -36,49 +45,32 @@ Cloudflare model overrides are available through Worker environment variables:
 npm install
 npm run type-check
 npm run build-check
+npm run audit
 npm run dev
 ```
 
-MCP endpoint: `http://localhost:8787/mcp` (or the port printed by Wrangler).
-Health endpoint: `/health`.
+The Worker needs the Workers AI binding named `AI`; this is declared in `wrangler.jsonc`.
 
-## Cloudflare deploy
+## Deployment
 
 ```bash
 npm run deploy
 ```
 
-The Worker needs the Workers AI binding named `AI`; this is already declared in `wrangler.jsonc`.
-
-For GitHub Actions deployment, add repository secrets:
-
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-- `AUDITOR_ACCESS_KEY` (optional for the current MVP guard)
-
-Then run the manual `deploy-cloudflare` workflow.
-
-After deployment, set the real MCP URL in the plugin:
-
-```bash
-node configure-plugin.mjs https://<worker>.workers.dev/mcp
-```
-
-Then commit the updated `openai.yaml`.
+The checked-in plugin dependency already points to the live MCP URL.
 
 ## Authentication
 
 The Worker supports an optional temporary access-key guard. If the Cloudflare secret `AUDITOR_ACCESS_KEY` is configured, `/mcp` accepts either an `Authorization: Bearer <key>` header or a matching `?key=<key>` query parameter. If the secret is absent, `/mcp` is public.
 
-This key guard is useful for controlled testing, but the production target should use an MCP-compatible OAuth 2.1 flow or Cloudflare Access rather than embedding a long-lived secret in a public URL. Never commit access keys to this public repository.
-
-## GitHub Actions
-
-- `ci.yml` installs dependencies, runs TypeScript checks, and performs a Wrangler `deploy --dry-run` bundle validation on pushes/PRs.
-- `deploy.yml` is manual only and deploys with the Cloudflare repository secrets above.
+The temporary key guard is intended only for controlled testing. The production target should use an MCP-compatible OAuth 2.1 flow or another authentication mechanism supported by the ChatGPT MCP connection rather than embedding a long-lived secret in a public URL.
 
 ## Plugin behavior
 
 The skill is intentionally broad for complex work: multi-step research, analysis, troubleshooting, planning, comparisons, consequential recommendations, and architecture/implementation-plan decisions should receive one compact review before the final answer. Simple chat, deterministic calculations, straightforward rewriting/translation, and purely creative tasks skip the external review.
 
-Normal ChatGPT skill invocation is model-selected, so the skill can strongly encourage review across complex chats but cannot guarantee that every eligible response invokes the tool. A custom Responses API orchestration can force the MCP tool when strict enforcement is required.
+Normal ChatGPT skill invocation is model-selected, so the skill can strongly encourage review across complex chats but cannot guarantee that every eligible response invokes the tool. A custom API orchestration can enforce the tool when strict invocation is required.
+
+## Security and dependency checks
+
+`npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. The earlier four high-severity findings were in the Wrangler/Miniflare development toolchain; Wrangler was upgraded from 4.105.0 to 4.129.1 rather than using `npm audit fix --force`.
