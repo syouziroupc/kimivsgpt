@@ -26,12 +26,37 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 3 --retry-delay 1 \
-            -D /tmp/mcp-headers.txt \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json, text/event-stream' \
             --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"kimivsgpt-smoke","version":"1.0.0"}}}' \
             https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
             | tee /tmp/mcp-init.txt
-          echo '--- headers ---'
-          cat /tmp/mcp-headers.txt
-          grep -Eq 'serverInfo|kimi-vs-gpt-auditor|result' /tmp/mcp-init.txt
+          grep -Eq 'serverInfo|kimi-vs-gpt-auditor' /tmp/mcp-init.txt
+
+      - name: List tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            | tee /tmp/mcp-tools.txt
+          grep -q 'review_strategy' /tmp/mcp-tools.txt
+
+      - name: Call review strategy once
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"review_strategy","arguments":{"user_request":"Compare two deployment approaches and choose the safer one.","proposed_direction":"Use the existing production credential path because it has already deployed another Worker successfully.","key_claims":["The credential path is currently valid."],"assumptions":["Reusing the path does not expose credentials."],"evidence":["A CI job verified the Cloudflare credentials and deployed the Worker."],"constraints":["Keep the external critic concise and do not delegate implementation."],"uncertainties":["Whether any additional access control is needed before broad use."],"review_level":"standard"}}}'
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data "$payload" \
+            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            | tee /tmp/mcp-call.txt
+          ! grep -q 'audit_failed' /tmp/mcp-call.txt
+          grep -Eq 'verdict|proceed|revise|verify' /tmp/mcp-call.txt
