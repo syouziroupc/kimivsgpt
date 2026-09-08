@@ -1,0 +1,56 @@
+name: patch-oauth-flow-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[patch-oauth-flow]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply narrowly-scoped OAuth fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/index.ts')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''  code_challenge: string;\n  scope: string;\n  resource: string;\n  state: string;\n}> {'''
+          new = '''  response_type: string;\n  code_challenge: string;\n  code_challenge_method: string;\n  scope: string;\n  resource: string;\n  state: string;\n}> {'''
+          if old not in s:
+              raise SystemExit('return type patch target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''  return {\n    client_id: clientId,\n    redirect_uri: redirectUri,\n    code_challenge: challenge,\n    scope: OAUTH_SCOPE,'''
+          new = '''  return {\n    client_id: clientId,\n    redirect_uri: redirectUri,\n    response_type: "code",\n    code_challenge: challenge,\n    code_challenge_method: "S256",\n    scope: OAUTH_SCOPE,'''
+          if old not in s:
+              raise SystemExit('authorize return patch target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''async function handleOAuthRegister(request: Request, env: Env): Promise<Response> {\n  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });\n  let body: Record<string, unknown>;'''
+          new = '''async function handleOAuthRegister(request: Request, env: Env): Promise<Response> {\n  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });\n  if (env.AUTH_RATE_LIMITER) {\n    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";\n    const { success } = await env.AUTH_RATE_LIMITER.limit({ key: `dcr:${ip}` });\n    if (!success) return oauthError("slow_down", "Too many client registration attempts.", 429);\n  }\n  let body: Record<string, unknown>;'''
+          if old not in s:
+              raise SystemExit('DCR limiter patch target not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- src/index.ts
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'syouziroupc'
+          git config user.email 'syouziroupc@gmail.com'
+          git add src/index.ts
+          git commit -m 'Fix OAuth PKCE form continuity and DCR abuse guard'
+          git push origin HEAD:main
