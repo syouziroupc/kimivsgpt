@@ -13,6 +13,7 @@ interface Env {
 
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
+const MAX_PACKET_CHARS = 7000;
 
 const AUDITOR_PROMPT = `You are a compact adversarial reviewer for another AI's proposed answer direction.
 
@@ -149,11 +150,16 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
   const standard = env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL;
   const deep = env.AUDITOR_MODEL_DEEP || DEEP_MODEL;
   const selected = packet.review_level === "deep" ? deep : standard;
+  const serialized = JSON.stringify(packet);
+
+  if (serialized.length > MAX_PACKET_CHARS) {
+    throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
+  }
 
   const input = {
     messages: [
       { role: "system", content: AUDITOR_PROMPT },
-      { role: "user", content: JSON.stringify(packet) },
+      { role: "user", content: serialized },
     ],
     response_format: {
       type: "json_schema",
