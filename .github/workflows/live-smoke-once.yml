@@ -1,0 +1,37 @@
+name: live-smoke-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[live-smoke]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl --fail --silent --show-error --retry 3 --retry-delay 1 https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health)"
+          echo "$body"
+          printf '%s' "$body" | grep -q '"ok":true'
+
+      - name: Initialize MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 --retry-delay 1 \
+            -D /tmp/mcp-headers.txt \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"kimivsgpt-smoke","version":"1.0.0"}}}' \
+            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            | tee /tmp/mcp-init.txt
+          echo '--- headers ---'
+          cat /tmp/mcp-headers.txt
+          grep -Eq 'serverInfo|kimi-vs-gpt-auditor|result' /tmp/mcp-init.txt
