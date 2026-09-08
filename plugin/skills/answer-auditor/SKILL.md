@@ -22,11 +22,11 @@ Do not invoke for greetings, simple factual lookups with one unambiguous verifie
 
 ## Compact packet
 
-Before the final answer, send only a compressed summary. Never send hidden reasoning or a transcript.
+Before the final answer, send only a compressed summary. Never send hidden reasoning or a transcript. Keep the entire packet comfortably below the Worker's 5,000-character hard limit.
 
-- `user_request`: one or two sentences.
+- `user_request`: one or two short sentences.
 - `proposed_direction`: the tentative conclusion/direction only.
-- `key_claims`: at most six short claims that materially support the conclusion.
+- `key_claims`: at most five short claims that materially support the conclusion.
 - `assumptions`: only assumptions that could change the result.
 - `evidence`: short source/evidence summaries, not copied pages or long excerpts.
 - `constraints`: only explicit constraints that matter.
