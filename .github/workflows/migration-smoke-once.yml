@@ -1,0 +1,52 @@
+name: migration-smoke-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[migration-smoke]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health)"
+          echo "$body"
+          printf '%s' "$body" | grep -q '"version":"0.3.2"'
+      - name: Initialize and list tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"migration-smoke","version":"1.0.0"}}}' \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp | tee /tmp/init.txt
+          grep -q 'kimi-vs-gpt-auditor' /tmp/init.txt
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp | tee /tmp/tools.txt
+          grep -q 'review_strategy' /tmp/tools.txt
+      - name: Call standard review once
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"review_strategy","arguments":{"user_request":"Choose the canonical deployment target.","proposed_direction":"Use the GitHub-linked kimivsgpt Worker and retire the duplicate auditor Worker.","key_claims":["The kimivsgpt Worker is linked to the source repository.","The canonical deployment workflow successfully deployed version 0.3.2 there."],"assumptions":["The old Worker is no longer needed after the plugin URL is migrated."],"evidence":["Health check returned version 0.3.2 from kimivsgpt.syouziroupc.workers.dev."],"constraints":["Keep only one Cloudflare Worker for this project."],"uncertainties":[],"review_level":"standard"}}}'
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data "$payload" \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp | tee /tmp/call.txt
+          ! grep -q 'audit_failed' /tmp/call.txt
+          grep -Eq 'verdict|proceed|revise|verify' /tmp/call.txt
