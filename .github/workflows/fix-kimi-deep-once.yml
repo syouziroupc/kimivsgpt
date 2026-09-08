@@ -120,7 +120,7 @@ jobs:
           }
 
           function errorText'''
-          s, n = parser_pattern.subn(parser_replacement, s, count=1)
+          s, n = parser_pattern.subn(lambda _m: parser_replacement, s, count=1)
           if n != 1:
               raise SystemExit(f'parseAudit replacement count={n}')
 
@@ -154,7 +154,7 @@ jobs:
           }
 
           async function runReview'''
-          s, n = invoke_pattern.subn(invoke_replacement, s, count=1)
+          s, n = invoke_pattern.subn(lambda _m: invoke_replacement, s, count=1)
           if n != 1:
               raise SystemExit(f'invokeModel replacement count={n}')
 
