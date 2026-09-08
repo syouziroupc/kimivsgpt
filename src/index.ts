@@ -204,7 +204,7 @@ function createServer(env: Env) {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return Response.json({
@@ -219,4 +219,4 @@ export default {
     const handler = createMcpHandler(() => createServer(env));
     return handler(request, env, ctx);
   },
-} satisfies ExportedHandler<Env>;
+};
