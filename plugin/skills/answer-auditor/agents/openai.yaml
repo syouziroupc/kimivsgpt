@@ -1,0 +1,15 @@
+interface:
+  display_name: "Answer Auditor"
+  short_description: "Compact second-opinion review for complex answers"
+  default_prompt: "Audit the proposed answer direction once before finalizing a complex response."
+
+policy:
+  allow_implicit_invocation: true
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "kimi-vs-gpt-auditor"
+      description: "Compact independent critic for anchoring, evidence gaps, missing alternatives, stale facts, bias, constraints, scope drift, and overconfidence."
+      transport: "streamable_http"
+      url: "https://YOUR-WORKER.workers.dev/mcp"
