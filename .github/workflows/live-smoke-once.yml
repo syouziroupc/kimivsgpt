@@ -1,3 +1,4 @@
+# live end-to-end smoke for deployed auditor v0.3.1
 name: live-smoke-once
 
 on:
@@ -20,6 +21,7 @@ jobs:
           body="$(curl --fail --silent --show-error --retry 3 --retry-delay 1 https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health)"
           echo "$body"
           printf '%s' "$body" | grep -q '"ok":true'
+          printf '%s' "$body" | grep -q '"version":"0.3.1"'
 
       - name: Initialize MCP
         shell: bash
