@@ -1,0 +1,72 @@
+name: oauth-smoke-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[oauth-smoke]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify health and OAuth metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          health="$(curl --fail --silent --show-error "$base/health")"
+          echo "$health"
+          printf '%s' "$health" | grep -q '"version":"0.5.0"'
+          printf '%s' "$health" | grep -q '"pkce":"S256"'
+          printf '%s' "$health" | grep -q '"standard":100'
+          printf '%s' "$health" | grep -q '"deep":5'
+
+          protected="$(curl --fail --silent --show-error "$base/.well-known/oauth-protected-resource")"
+          printf '%s' "$protected" | grep -q '"resource":"https://kimivsgpt.syouziroupc.workers.dev/mcp"'
+          printf '%s' "$protected" | grep -q '"auditor:review"'
+
+          auth="$(curl --fail --silent --show-error "$base/.well-known/oauth-authorization-server")"
+          printf '%s' "$auth" | grep -q '"authorization_endpoint":"https://kimivsgpt.syouziroupc.workers.dev/oauth/authorize"'
+          printf '%s' "$auth" | grep -q '"registration_endpoint":"https://kimivsgpt.syouziroupc.workers.dev/oauth/register"'
+          printf '%s' "$auth" | grep -q '"S256"'
+
+      - name: Verify unauthenticated MCP OAuth challenge
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          code="$(curl --silent --show-error -D /tmp/mcp-headers.txt -o /tmp/mcp-body.txt --write-out '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"oauth-smoke","version":"1.0"}}}' \
+            "$base/mcp")"
+          test "$code" = '401'
+          grep -qi '^www-authenticate: Bearer ' /tmp/mcp-headers.txt
+          grep -qi 'resource_metadata="https://kimivsgpt.syouziroupc.workers.dev/.well-known/oauth-protected-resource"' /tmp/mcp-headers.txt
+
+      - name: Verify dynamic client registration without calling AI
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          client="$(curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            --data '{"client_name":"Kimi vs GPT OAuth smoke","redirect_uris":["http://127.0.0.1:54321/callback"],"token_endpoint_auth_method":"none","application_type":"native","response_types":["code"],"grant_types":["authorization_code","refresh_token"]}' \
+            "$base/oauth/register")"
+          echo "$client" | sed -E 's/"client_id":"[^"]+"/"client_id":"<redacted>"/'
+          printf '%s' "$client" | grep -q '"client_id":"mcp_'
+          printf '%s' "$client" | grep -q '"token_endpoint_auth_method":"none"'
+
+      - name: Verify owner authorization remains closed until secret enrollment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          code="$(curl --silent --show-error -o /tmp/authorize-body.txt --write-out '%{http_code}' "$base/oauth/authorize")"
+          echo "authorize_status=$code"
+          test "$code" = '503'
+          grep -q 'Owner OAuth is not configured yet' /tmp/authorize-body.txt
