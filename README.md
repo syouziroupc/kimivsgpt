@@ -12,7 +12,7 @@ The primary model still researches, reasons, writes, and codes. This project giv
 - Canonical Cloudflare account: `Syouziroupc@gmail.com's Account`
 - Canonical Cloudflare project is the GitHub-linked `kimivsgpt` Worker.
 - Production Cloudflare credentials are centralized in the CPCV repository `production` environment.
-- The old `kimi-vs-gpt-auditor` Worker is a migration source only and should be removed after the canonical Worker passes live MCP verification.
+- The duplicate `kimi-vs-gpt-auditor` Worker was removed after end-to-end MCP verification succeeded on the canonical Worker.
 
 TalkSys and this auditor use the same CPCV `production` Cloudflare account. The CPCV workflow verifies the authenticated account name with `wrangler whoami` before deployment and aborts if it is not the canonical account.
 
