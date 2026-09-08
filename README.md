@@ -8,9 +8,8 @@ The primary model still researches, reasons, writes, and codes. This project giv
 
 - Worker: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev`
 - MCP: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp`
-- Current Worker version: `0.3.1`
-- Cloudflare deployment version ID: `e2622702-c105-4490-9660-ff8b2f5487d6`
-- End-to-end verified: health, MCP initialize, tools/list, and a real `review_strategy` Workers AI call.
+- Current Worker target version: `0.3.2`
+- End-to-end verification covers health, MCP initialize, tools/list, and a real `review_strategy` Workers AI call.
 
 ## Architecture
 
@@ -33,6 +32,7 @@ The primary model still researches, reasons, writes, and codes. This project giv
 - No transcript dumps, codebase dumps, delegated coding, research, or replacement answers.
 - Standard review uses one model call. Minor output-schema variation is normalized locally rather than retried.
 - Kimi is not used merely because a task is long.
+- Cloudflare rate limit: standard reviews 30/minute; deep/Kimi reviews 3/minute. MCP initialization and tool listing are not counted.
 
 Cloudflare model overrides are available through Worker environment variables:
 
@@ -43,13 +43,13 @@ Cloudflare model overrides are available through Worker environment variables:
 
 ```bash
 npm install
+npm run audit
 npm run type-check
 npm run build-check
-npm run audit
 npm run dev
 ```
 
-The Worker needs the Workers AI binding named `AI`; this is declared in `wrangler.jsonc`.
+The Worker needs the Workers AI binding named `AI`; rate-limit bindings are declared in `wrangler.jsonc`.
 
 ## Deployment
 
@@ -63,7 +63,7 @@ The checked-in plugin dependency already points to the live MCP URL.
 
 The Worker supports an optional temporary access-key guard. If the Cloudflare secret `AUDITOR_ACCESS_KEY` is configured, `/mcp` accepts either an `Authorization: Bearer <key>` header or a matching `?key=<key>` query parameter. If the secret is absent, `/mcp` is public.
 
-The temporary key guard is intended only for controlled testing. The production target should use an MCP-compatible OAuth 2.1 flow or another authentication mechanism supported by the ChatGPT MCP connection rather than embedding a long-lived secret in a public URL.
+The temporary key guard is intended only for controlled testing. The production target should ultimately use an MCP-compatible OAuth flow or another authentication mechanism supported by the ChatGPT MCP connection rather than embedding a long-lived secret in a public URL. Rate limiting remains enabled as a separate cost-abuse guard.
 
 ## Plugin behavior
 
@@ -73,4 +73,4 @@ Normal ChatGPT skill invocation is model-selected, so the skill can strongly enc
 
 ## Security and dependency checks
 
-`npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. The earlier four high-severity findings were in the Wrangler/Miniflare development toolchain; Wrangler was upgraded from 4.105.0 to 4.129.1 rather than using `npm audit fix --force`.
+`npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. The earlier four high-severity findings were in the Wrangler/Miniflare development toolchain; Wrangler was upgraded from 4.105.0 to 4.129.1 rather than using `npm audit fix --force`. CI now runs `npm audit`, TypeScript checking, and Wrangler dry-run validation on every push and pull request.
