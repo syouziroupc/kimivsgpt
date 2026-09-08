@@ -1,11 +1,3 @@
-interface:
-  display_name: "Answer Auditor"
-  short_description: "Compact second-opinion review for complex answers"
-  default_prompt: "Audit the proposed answer direction once before finalizing a complex response."
-
-policy:
-  allow_implicit_invocation: true
-
 dependencies:
   tools:
     - type: "mcp"
