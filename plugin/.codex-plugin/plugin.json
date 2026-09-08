@@ -10,6 +10,7 @@
   "repository": "https://github.com/syouziroupc/kimivsgpt",
   "keywords": ["review", "critic", "reasoning", "verification", "second-opinion", "quality-control"],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kimi vs GPT Answer Auditor",
     "shortDescription": "Compact second opinion before complex answers",
