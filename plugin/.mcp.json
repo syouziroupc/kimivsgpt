@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kimi-vs-gpt-auditor": {
+      "type": "http",
+      "url": "https://kimivsgpt.syouziroupc.workers.dev/mcp"
+    }
+  }
+}
