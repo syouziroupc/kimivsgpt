@@ -29,7 +29,7 @@ interface Env {
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 const DEFAULT_DAILY_STANDARD_LIMIT = 100;
 const DEFAULT_DAILY_DEEP_LIMIT = 5;
 
@@ -71,6 +71,33 @@ const resultSchema = z.object({
   next_step: z.string().max(180),
   confidence: z.number().min(0).max(1),
 }).strict();
+
+const AUDIT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdict: { type: "string", enum: ["proceed", "revise", "verify"] },
+    risk: { type: "integer", minimum: 0, maximum: 3 },
+    issues: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          type: { type: "string", enum: [...ISSUE_TYPES] },
+          target: { type: "string", maxLength: 120 },
+          correction: { type: "string", maxLength: 180 },
+        },
+        required: ["type", "target", "correction"],
+      },
+    },
+    verify: { type: "array", maxItems: 2, items: { type: "string", maxLength: 160 } },
+    next_step: { type: "string", maxLength: 180 },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["verdict", "risk", "issues", "verify", "next_step", "confidence"],
+} as const;
 
 type AuditResult = z.infer<typeof resultSchema>;
 
@@ -183,8 +210,11 @@ function parseAudit(raw: unknown): AuditResult {
     const first = asRecord(choiceRoot.choices[0]);
     const message = asRecord(first?.message);
     if (message) {
+      const parsedContent = asRecord(message.parsed);
       const directContent = asRecord(message.content);
-      if (directContent) {
+      if (parsedContent) {
+        value = parsedContent;
+      } else if (directContent) {
         value = directContent;
       } else {
         const content = extractTextContent(message.content);
@@ -272,10 +302,13 @@ async function invokeModel(env: Env, model: string, serialized: string): Promise
   };
 
   if (kimi26) {
-    // Kimi K2.6 uses chat_template_kwargs.thinking. Disable hidden reasoning so the
-    // small audit budget is spent on the final JSON instead of reasoning-only output.
-    input.reasoning_effort = null;
+    // Kimi K2.6 uses chat_template_kwargs.thinking for reasoning control. Keep thinking
+    // off for this compact critic and require a schema-valid result instead of parsing prose.
     input.chat_template_kwargs = { thinking: false };
+    input.response_format = {
+      type: "json_schema",
+      json_schema: AUDIT_JSON_SCHEMA,
+    };
   } else {
     input.reasoning_effort = "low";
   }
