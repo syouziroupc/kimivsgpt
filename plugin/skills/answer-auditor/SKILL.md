@@ -1,11 +1,11 @@
 ---
 name: answer-auditor
-description: Use an independent compact critic before finalizing every complex factual, analytical, research, troubleshooting, planning, recommendation, comparison, coding-plan, or consequential judgment task. Skip trivial chat, simple rewriting/translation, deterministic arithmetic, and purely creative requests.
+description: Use a compact independent review before finalizing complex factual, analytical, research, troubleshooting, planning, recommendation, comparison, coding-plan, or consequential judgment tasks. Prefer the external review_strategy tool when available; otherwise perform a concise internal counter-check without claiming external review occurred. Skip trivial chat, simple rewriting/translation, deterministic arithmetic, and purely creative requests.
 ---
 
 # Answer Auditor
 
-Use `review_strategy` once before committing to the final answer on complex tasks.
+For complex tasks, review the proposed direction once before committing to the final answer.
 
 ## Trigger
 
@@ -20,9 +20,11 @@ Treat a task as complex when one or more apply:
 
 Do not invoke for greetings, simple factual lookups with one unambiguous verified answer, deterministic calculations, straightforward rewriting/translation, or purely creative generation.
 
-## Compact packet
+## External review when available
 
-Before the final answer, send only a compressed summary. Never send hidden reasoning or a transcript. Keep the entire packet comfortably below the Worker's 5,000-character hard limit.
+If `review_strategy` is available, call it once before the final answer. The external critic is advisory, not an authority.
+
+Before calling it, send only a compressed review packet. Never send hidden reasoning, chain-of-thought, or a transcript. Keep the entire packet comfortably below the Worker's 5,000-character hard limit.
 
 - `user_request`: one or two short sentences.
 - `proposed_direction`: the tentative conclusion/direction only.
@@ -33,11 +35,21 @@ Before the final answer, send only a compressed summary. Never send hidden reaso
 - `uncertainties`: unresolved material points only.
 - `review_level`: `standard` by default.
 
-Use `deep` only when the decision is materially high-stakes, expensive/irreversible, legally or medically consequential, security-sensitive, or unusually disputed with weak evidence. Do not use `deep` merely because the task is long.
+Use `deep` only when the decision is materially high-stakes, expensive or irreversible, legally or medically consequential, security-sensitive, or unusually disputed with weak evidence. Do not use `deep` merely because the task is long.
+
+## Fallback when the external tool is unavailable
+
+If `review_strategy` is not available on the current product surface or plan, do not block the user's task and do not pretend that an external model was consulted. Perform one brief internal counter-check instead:
+
+1. Identify the tentative conclusion.
+2. Ask what evidence could make it wrong.
+3. Check the strongest plausible alternative.
+4. Check explicit user constraints and unresolved factual uncertainty.
+5. Revise only if the counter-check materially changes the answer.
+
+Do not expose private chain-of-thought. This fallback is a quality-control instruction, not a second independent model.
 
 ## After review
-
-The critic is advisory, not a source of truth.
 
 - Check each material criticism against actual evidence.
 - Correct the answer when supported.
