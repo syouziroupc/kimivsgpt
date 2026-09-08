@@ -8,6 +8,7 @@ interface Env {
   };
   AUDITOR_MODEL_STANDARD?: string;
   AUDITOR_MODEL_DEEP?: string;
+  AUDITOR_ACCESS_KEY?: string;
 }
 
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
@@ -173,6 +174,17 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
   }
 }
 
+function isAuthorized(request: Request, env: Env): boolean {
+  const expected = env.AUDITOR_ACCESS_KEY;
+  if (!expected) return true;
+
+  const bearer = request.headers.get("authorization");
+  if (bearer === `Bearer ${expected}`) return true;
+
+  const key = new URL(request.url).searchParams.get("key");
+  return key === expected;
+}
+
 function createServer(env: Env) {
   const server = new McpServer({ name: "kimi-vs-gpt-auditor", version: "0.2.0" });
 
@@ -216,6 +228,7 @@ export default {
     }
 
     if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
+    if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
     const handler = createMcpHandler(() => createServer(env));
     return handler(request, env, ctx);
   },
