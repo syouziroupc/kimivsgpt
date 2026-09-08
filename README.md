@@ -19,7 +19,8 @@ The primary model still researches, reasons, writes, and codes. This project onl
 - Deep model: `@cf/moonshotai/kimi-k2.6`.
 - `deep` is reserved for materially high-stakes or unusually disputed decisions.
 - Completion cap: 500 tokens.
-- Input fields have strict size limits.
+- Review packet hard cap: 7,000 characters.
+- Individual input fields also have strict size limits.
 - One review call per substantive answer by default.
 - No transcript dumps, codebase dumps, or delegated coding/research.
 
@@ -47,6 +48,14 @@ npm run deploy
 
 The Worker needs the Workers AI binding named `AI`; this is already declared in `wrangler.jsonc`.
 
+For GitHub Actions deployment, add repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `AUDITOR_ACCESS_KEY` (optional for the current MVP guard)
+
+Then run the manual `deploy-cloudflare` workflow.
+
 After deployment, set the real MCP URL in the plugin:
 
 ```bash
@@ -55,11 +64,19 @@ node configure-plugin.mjs https://<worker>.workers.dev/mcp
 
 Then commit the updated `openai.yaml`.
 
+## Authentication
+
+The Worker supports an optional temporary access-key guard. If the Cloudflare secret `AUDITOR_ACCESS_KEY` is configured, `/mcp` accepts either an `Authorization: Bearer <key>` header or a matching `?key=<key>` query parameter. If the secret is absent, `/mcp` is public.
+
+This key guard is useful for controlled testing, but the production target should use an MCP-compatible OAuth 2.1 flow or Cloudflare Access rather than embedding a long-lived secret in a public URL. Never commit access keys to this public repository.
+
 ## GitHub Actions
 
-- `ci.yml` runs TypeScript checks on pushes/PRs.
-- `deploy.yml` is manual only. To use it, add repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, then run the workflow.
+- `ci.yml` installs dependencies and runs TypeScript checks on pushes/PRs.
+- `deploy.yml` is manual only and deploys with the Cloudflare repository secrets above.
 
-## Current security note
+## Plugin behavior
 
-The MVP MCP endpoint is unauthenticated. Do not publish/deploy it broadly until an authentication layer or a suitably restrictive access control is added; otherwise anyone who discovers the endpoint could consume Workers AI usage. Authentication is intentionally the next deployment step rather than hard-coding a secret into this public repository.
+The skill is intentionally broad for complex work: multi-step research, analysis, troubleshooting, planning, comparisons, consequential recommendations, and architecture/implementation-plan decisions should receive one compact review before the final answer. Simple chat, deterministic calculations, straightforward rewriting/translation, and purely creative tasks skip the external review.
+
+Normal ChatGPT skill invocation is model-selected, so the skill can strongly encourage review across complex chats but cannot guarantee that every eligible response invokes the tool. A custom Responses API orchestration can force the MCP tool when strict enforcement is required.
