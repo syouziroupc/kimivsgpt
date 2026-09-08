@@ -345,7 +345,9 @@ function escapeHtml(value: string): string {
 async function validateAuthorizeParams(env: Env, params: URLSearchParams, origin: string): Promise<{
   client_id: string;
   redirect_uri: string;
+  response_type: string;
   code_challenge: string;
+  code_challenge_method: string;
   scope: string;
   resource: string;
   state: string;
@@ -370,7 +372,9 @@ async function validateAuthorizeParams(env: Env, params: URLSearchParams, origin
   return {
     client_id: clientId,
     redirect_uri: redirectUri,
+    response_type: "code",
     code_challenge: challenge,
+    code_challenge_method: "S256",
     scope: OAUTH_SCOPE,
     resource,
     state,
@@ -400,6 +404,11 @@ body{font-family:system-ui,sans-serif;max-width:520px;margin:64px auto;padding:0
 
 async function handleOAuthRegister(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  if (env.AUTH_RATE_LIMITER) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    const { success } = await env.AUTH_RATE_LIMITER.limit({ key: `dcr:${ip}` });
+    if (!success) return oauthError("slow_down", "Too many client registration attempts.", 429);
+  }
   let body: Record<string, unknown>;
   try {
     body = await request.json() as Record<string, unknown>;
