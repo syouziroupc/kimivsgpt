@@ -1,0 +1,41 @@
+name: patch-server-instructions-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[patch-server-instructions]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add server-wide auditor instructions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text(encoding='utf-8')
+          old='''function createServer(env: Env) {\n  const server = new McpServer({ name: "kimi-vs-gpt-auditor", version: VERSION });'''
+          new='''function createServer(env: Env) {\n  const server = new McpServer(\n    { name: "kimi-vs-gpt-auditor", version: VERSION },\n    {\n      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought."\n    }\n  );'''
+          if old not in s:
+              raise SystemExit('createServer patch target not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- src/index.ts
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'syouziroupc'
+          git config user.email 'syouziroupc@gmail.com'
+          git add src/index.ts
+          git commit -m 'Add MCP instructions for one compact review on complex work'
+          git push origin HEAD:main
