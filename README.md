@@ -9,7 +9,11 @@ The primary model still researches, reasons, writes, and codes. This project giv
 - Worker: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev`
 - MCP: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp`
 - Current Worker target version: `0.3.2`
-- End-to-end verification covers health, MCP initialize, tools/list, and a real `review_strategy` Workers AI call.
+- Canonical Cloudflare account: `Syouziroupc@gmail.com's Account`
+- Production Cloudflare credentials are centralized in the CPCV repository `production` environment.
+- The auditor repository intentionally does not keep a second Cloudflare deploy workflow/credential path.
+
+TalkSys and this auditor are deployed through the same CPCV `production` Cloudflare account. The CPCV workflow verifies the authenticated account name with `wrangler whoami` before deployment and aborts if it is not the canonical account.
 
 ## Architecture
 
@@ -51,13 +55,11 @@ npm run dev
 
 The Worker needs the Workers AI binding named `AI`; rate-limit bindings are declared in `wrangler.jsonc`.
 
-## Deployment
+## Production deployment
 
-```bash
-npm run deploy
-```
+Production deployment is owned by `syouziroupc/CPCV/.github/workflows/deploy-kimivsgpt.yml` and uses the CPCV `production` environment credentials. Do not add a separate Cloudflare API token/account ID to this repository for production deployment.
 
-The checked-in plugin dependency already points to the live MCP URL.
+The checked-in plugin dependency points to the live MCP URL.
 
 ## Authentication
 
