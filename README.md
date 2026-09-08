@@ -6,14 +6,15 @@ The primary model still researches, reasons, writes, and codes. This project giv
 
 ## Live deployment
 
-- Worker: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev`
-- MCP: `https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp`
+- Canonical Worker: `https://kimivsgpt.syouziroupc.workers.dev`
+- MCP: `https://kimivsgpt.syouziroupc.workers.dev/mcp`
 - Current Worker target version: `0.3.2`
 - Canonical Cloudflare account: `Syouziroupc@gmail.com's Account`
+- Canonical Cloudflare project is the GitHub-linked `kimivsgpt` Worker.
 - Production Cloudflare credentials are centralized in the CPCV repository `production` environment.
-- The auditor repository intentionally does not keep a second Cloudflare deploy workflow/credential path.
+- The old `kimi-vs-gpt-auditor` Worker is a migration source only and should be removed after the canonical Worker passes live MCP verification.
 
-TalkSys and this auditor are deployed through the same CPCV `production` Cloudflare account. The CPCV workflow verifies the authenticated account name with `wrangler whoami` before deployment and aborts if it is not the canonical account.
+TalkSys and this auditor use the same CPCV `production` Cloudflare account. The CPCV workflow verifies the authenticated account name with `wrangler whoami` before deployment and aborts if it is not the canonical account.
 
 ## Architecture
 
@@ -57,9 +58,9 @@ The Worker needs the Workers AI binding named `AI`; rate-limit bindings are decl
 
 ## Production deployment
 
-Production deployment is owned by `syouziroupc/CPCV/.github/workflows/deploy-kimivsgpt.yml` and uses the CPCV `production` environment credentials. Do not add a separate Cloudflare API token/account ID to this repository for production deployment.
+Production deployment is owned by `syouziroupc/CPCV/.github/workflows/deploy-kimivsgpt.yml` and uses the CPCV `production` environment credentials. The target Worker name is `kimivsgpt`, matching the GitHub-linked Cloudflare project. Do not add a second Cloudflare API token/account ID or alternate production Worker to this repository.
 
-The checked-in plugin dependency points to the live MCP URL.
+The checked-in plugin dependency points to the canonical live MCP URL.
 
 ## Authentication
 
@@ -75,4 +76,4 @@ Normal ChatGPT skill invocation is model-selected, so the skill can strongly enc
 
 ## Security and dependency checks
 
-`npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. The earlier four high-severity findings were in the Wrangler/Miniflare development toolchain; Wrangler was upgraded from 4.105.0 to 4.129.1 rather than using `npm audit fix --force`. CI now runs `npm audit`, TypeScript checking, and Wrangler dry-run validation on every push and pull request.
+`npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. CI runs `npm audit`, TypeScript checking, and Wrangler dry-run validation on every push and pull request.
