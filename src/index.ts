@@ -15,12 +15,13 @@ interface Env {
   AUDITOR_MODEL_STANDARD?: string;
   AUDITOR_MODEL_DEEP?: string;
   AUDITOR_ACCESS_KEY?: string;
+  OPENAI_APPS_CHALLENGE?: string;
 }
 
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -256,7 +257,7 @@ function createServer(env: Env) {
     {
       description: "Give one compact independent critique of a proposed answer direction before a complex factual, analytical, research, troubleshooting, planning, recommendation, comparison, coding-plan, or consequential judgment answer. Never solve the underlying task or write code.",
       inputSchema: packetSchema,
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async (input) => {
       try {
@@ -281,6 +282,14 @@ function createServer(env: Env) {
 export default {
   async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/.well-known/openai-apps-challenge") {
+      const token = env.OPENAI_APPS_CHALLENGE;
+      if (!token) return new Response("Not configured", { status: 404 });
+      return new Response(token, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
 
     if (url.pathname === "/health") {
       return Response.json({
