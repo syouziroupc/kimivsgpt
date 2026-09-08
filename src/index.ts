@@ -2,10 +2,16 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
 
+interface RateLimitBinding {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
+}
+
 interface Env {
   AI: {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
+  AUDIT_RATE_LIMITER?: RateLimitBinding;
+  DEEP_RATE_LIMITER?: RateLimitBinding;
   AUDITOR_MODEL_STANDARD?: string;
   AUDITOR_MODEL_DEEP?: string;
   AUDITOR_ACCESS_KEY?: string;
@@ -14,7 +20,7 @@ interface Env {
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -203,6 +209,45 @@ function isAuthorized(request: Request, env: Env): boolean {
   return key === expected;
 }
 
+function reviewCallLevel(value: unknown): "standard" | "deep" | null {
+  const root = asRecord(value);
+  if (!root || root.method !== "tools/call") return null;
+  const params = asRecord(root.params);
+  if (!params || params.name !== "review_strategy") return null;
+  const args = asRecord(params.arguments);
+  return args?.review_level === "deep" ? "deep" : "standard";
+}
+
+async function enforceReviewRateLimit(request: Request, env: Env): Promise<Response | null> {
+  if (request.method !== "POST") return null;
+
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return null;
+  }
+
+  const messages = Array.isArray(body) ? body : [body];
+  const levels = messages.map(reviewCallLevel).filter((level): level is "standard" | "deep" => level !== null);
+  if (levels.length === 0) return null;
+  if (levels.length > 1) {
+    return Response.json({ error: "batched_review_calls_not_allowed" }, { status: 400 });
+  }
+
+  const level = levels[0];
+  const limiter = level === "deep" ? env.DEEP_RATE_LIMITER : env.AUDIT_RATE_LIMITER;
+  if (!limiter) return null;
+
+  const { success } = await limiter.limit({ key: `review_strategy:${level}` });
+  if (success) return null;
+
+  return Response.json(
+    { error: "rate_limit_exceeded", review_level: level },
+    { status: 429, headers: { "Retry-After": "60" } },
+  );
+}
+
 function createServer(env: Env) {
   const server = new McpServer({ name: "kimi-vs-gpt-auditor", version: VERSION });
 
@@ -245,11 +290,15 @@ export default {
         standard_model: env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL,
         deep_model: env.AUDITOR_MODEL_DEEP || DEEP_MODEL,
         max_packet_chars: MAX_PACKET_CHARS,
+        rate_limits: { standard_per_minute: 30, deep_per_minute: 3 },
       });
     }
 
     if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
     if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+
+    const rateLimited = await enforceReviewRateLimit(request, env);
+    if (rateLimited) return rateLimited;
 
     const handler = createMcpHandler(() => createServer(env));
     return handler(request, env, ctx);
