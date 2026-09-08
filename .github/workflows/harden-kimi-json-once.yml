@@ -1,0 +1,83 @@
+name: harden-kimi-json-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[harden-kimi-json]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enforce Kimi JSON Schema output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          p=Path('src/index.ts')
+          s=p.read_text(encoding='utf-8')
+          if 'const VERSION = "0.5.1";' not in s:
+              raise SystemExit('unexpected version')
+          s=s.replace('const VERSION = "0.5.1";', 'const VERSION = "0.5.2";', 1)
+
+          anchor='''}).strict();\n\ntype AuditResult = z.infer<typeof resultSchema>;\n'''
+          schema='''}).strict();\n\nconst AUDIT_JSON_SCHEMA = {\n  type: "object",\n  additionalProperties: false,\n  properties: {\n    verdict: { type: "string", enum: ["proceed", "revise", "verify"] },\n    risk: { type: "integer", minimum: 0, maximum: 3 },\n    issues: {\n      type: "array",\n      maxItems: 3,\n      items: {\n        type: "object",\n        additionalProperties: false,\n        properties: {\n          type: { type: "string", enum: [...ISSUE_TYPES] },\n          target: { type: "string", maxLength: 120 },\n          correction: { type: "string", maxLength: 180 },\n        },\n        required: ["type", "target", "correction"],\n      },\n    },\n    verify: { type: "array", maxItems: 2, items: { type: "string", maxLength: 160 } },\n    next_step: { type: "string", maxLength: 180 },\n    confidence: { type: "number", minimum: 0, maximum: 1 },\n  },\n  required: ["verdict", "risk", "issues", "verify", "next_step", "confidence"],\n} as const;\n\ntype AuditResult = z.infer<typeof resultSchema>;\n'''
+          if anchor not in s:
+              raise SystemExit('schema anchor not found')
+          s=s.replace(anchor, schema, 1)
+
+          old='''      const directContent = asRecord(message.content);\n      if (directContent) {\n        value = directContent;\n      } else {\n        const content = extractTextContent(message.content);'''
+          new='''      const parsedContent = asRecord(message.parsed);\n      const directContent = asRecord(message.content);\n      if (parsedContent) {\n        value = parsedContent;\n      } else if (directContent) {\n        value = directContent;\n      } else {\n        const content = extractTextContent(message.content);'''
+          if old not in s:
+              raise SystemExit('parser anchor not found')
+          s=s.replace(old,new,1)
+
+          old_kimi='''  if (kimi26) {\n    // Kimi K2.6 uses chat_template_kwargs.thinking. Disable hidden reasoning so the\n    // small audit budget is spent on the final JSON instead of reasoning-only output.\n    input.reasoning_effort = null;\n    input.chat_template_kwargs = { thinking: false };\n  } else {'''
+          new_kimi='''  if (kimi26) {\n    // Kimi K2.6 uses chat_template_kwargs.thinking for reasoning control. Keep thinking\n    // off for this compact critic and require a schema-valid result instead of parsing prose.\n    input.chat_template_kwargs = { thinking: false };\n    input.response_format = {\n      type: "json_schema",\n      json_schema: AUDIT_JSON_SCHEMA,\n    };\n  } else {'''
+          if old_kimi not in s:
+              raise SystemExit('Kimi anchor not found')
+          s=s.replace(old_kimi,new_kimi,1)
+          p.write_text(s,encoding='utf-8')
+
+          package=Path('package.json')
+          data=json.loads(package.read_text(encoding='utf-8'))
+          data['version']='0.5.2'
+          package.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+
+          git diff --check
+          grep -q 'const VERSION = "0.5.2";' src/index.ts
+          grep -q 'json_schema: AUDIT_JSON_SCHEMA' src/index.ts
+          grep -q 'const parsedContent = asRecord(message.parsed)' src/index.ts
+          ! grep -q 'input.reasoning_effort = null' src/index.ts
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install
+          npm run audit
+          npm run type-check
+          npm run build-check
+
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'syouziroupc'
+          git config user.email 'syouziroupc@gmail.com'
+          git add src/index.ts package.json package-lock.json
+          git commit -m 'Require schema-valid Kimi K2.6 audit output'
+          git push origin HEAD:main
