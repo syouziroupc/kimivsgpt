@@ -1,15 +1,29 @@
 {
   "name": "kimi-vs-gpt-auditor",
-  "version": "0.3.2",
-  "description": "Compact external pre-answer critique for complex ChatGPT and Codex tasks.",
+  "version": "0.4.0",
+  "description": "Compact independent review before complex ChatGPT and Codex answers.",
+  "author": {
+    "name": "syouziroupc",
+    "url": "https://github.com/syouziroupc"
+  },
+  "homepage": "https://github.com/syouziroupc/kimivsgpt",
   "repository": "https://github.com/syouziroupc/kimivsgpt",
-  "keywords": ["review", "critic", "reasoning", "verification"],
+  "keywords": ["review", "critic", "reasoning", "verification", "second-opinion", "quality-control"],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Answer Auditor",
-    "shortDescription": "Independent compact review before complex answers",
-    "longDescription": "Reviews a compressed proposed answer direction for anchoring, unsupported assumptions, missing alternatives, stale facts, constraint violations, and overconfidence without delegating the underlying task.",
+    "displayName": "Kimi vs GPT Answer Auditor",
+    "shortDescription": "Compact second opinion before complex answers",
+    "longDescription": "Adds a compact independent pre-answer review for complex analysis, research, troubleshooting, planning, recommendations, comparisons, and architecture decisions. The external critic is deliberately restricted to brief objections and verification requests; it does not draft the final answer, perform the primary research, or generate complete code.",
+    "developerName": "syouziroupc",
     "category": "Productivity",
-    "capabilities": ["Read"]
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/syouziroupc/kimivsgpt",
+    "privacyPolicyURL": "https://github.com/syouziroupc/kimivsgpt/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/syouziroupc/kimivsgpt/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Before finalizing this complex answer, challenge the leading conclusion and identify any missing evidence.",
+      "Review this troubleshooting direction for anchoring and overlooked alternatives before giving the final steps.",
+      "Check this recommendation for unsupported assumptions, constraint violations, and overconfidence before committing to it."
+    ]
   }
 }
