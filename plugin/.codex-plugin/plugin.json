@@ -1,0 +1,6 @@
+{
+  "name": "kimi-vs-gpt-auditor",
+  "version": "0.2.0",
+  "description": "Compact external pre-answer critique for complex ChatGPT and Codex tasks.",
+  "skills": "./skills/"
+}
