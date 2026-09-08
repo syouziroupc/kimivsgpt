@@ -558,7 +558,12 @@ async function isMcpAuthorized(request: Request, env: Env, origin: string): Prom
 }
 
 function createServer(env: Env) {
-  const server = new McpServer({ name: "kimi-vs-gpt-auditor", version: VERSION });
+  const server = new McpServer(
+    { name: "kimi-vs-gpt-auditor", version: VERSION },
+    {
+      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought."
+    }
+  );
 
   server.registerTool(
     "review_strategy",
