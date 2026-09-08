@@ -15,7 +15,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          body="$(curl --fail --silent --show-error --retry 3 --retry-delay 1 https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health)"
+          body="$(curl --fail --silent --show-error --retry 3 --retry-delay 1 https://kimivsgpt.syouziroupc.workers.dev/health)"
           echo "$body"
           printf '%s' "$body" | grep -q '"ok":true'
           printf '%s' "$body" | grep -q '"version":"0.3.2"'
@@ -28,7 +28,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json, text/event-stream' \
             --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"kimivsgpt-smoke","version":"1.0.0"}}}' \
-            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp \
             | tee /tmp/mcp-init.txt
           grep -Eq 'serverInfo|kimi-vs-gpt-auditor' /tmp/mcp-init.txt
 
@@ -41,7 +41,7 @@ jobs:
             -H 'Accept: application/json, text/event-stream' \
             -H 'MCP-Protocol-Version: 2025-03-26' \
             --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp \
             | tee /tmp/mcp-tools.txt
           grep -q 'review_strategy' /tmp/mcp-tools.txt
 
@@ -55,7 +55,7 @@ jobs:
             -H 'Accept: application/json, text/event-stream' \
             -H 'MCP-Protocol-Version: 2025-03-26' \
             --data "$payload" \
-            https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp \
             | tee /tmp/mcp-call.txt
           ! grep -q 'audit_failed' /tmp/mcp-call.txt
           grep -Eq 'verdict|proceed|revise|verify' /tmp/mcp-call.txt
