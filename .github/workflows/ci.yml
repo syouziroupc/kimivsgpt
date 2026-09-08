@@ -15,3 +15,15 @@ jobs:
       - run: npm run audit
       - run: npm run type-check
       - run: npm run build-check
+      - name: Validate plugin JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "JSON.parse(require('fs').readFileSync('plugin/.codex-plugin/plugin.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('plugin/.mcp.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('.agents/plugins/marketplace.json','utf8'))"
+      - name: Validate Windows installer syntax
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw -Path ./install-local.ps1
+          [void][scriptblock]::Create($text)
