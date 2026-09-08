@@ -4,4 +4,4 @@ dependencies:
       value: "kimi-vs-gpt-auditor"
       description: "Compact independent critic for anchoring, evidence gaps, missing alternatives, stale facts, bias, constraints, scope drift, and overconfidence."
       transport: "streamable_http"
-      url: "https://YOUR-WORKER.workers.dev/mcp"
+      url: "https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/mcp"
