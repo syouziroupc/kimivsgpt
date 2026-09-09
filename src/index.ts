@@ -320,14 +320,13 @@ function dailyLimit(env: Env, level: "standard" | "deep"): number {
     : parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
 }
 
-async function checkDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
-  const result = await getAuthState(env).checkUsage(level, dailyLimit(env, level));
-  if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
-}
-
 async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
   const result = await getAuthState(env).consumeUsage(level, dailyLimit(env, level));
   if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+}
+
+async function releaseDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+  await getAuthState(env).releaseUsage(level);
 }
 
 function isKimi26Model(model: string): boolean {
@@ -374,11 +373,14 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
     throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
   }
 
-  // Check quota before inference, but count only a successfully parsed audit.
-  await checkDailyBudget(env, packet.review_level);
-  const audit = await invokeModel(env, selected, serialized);
+  // Reserve one quota unit atomically. Failed model/output parsing is refunded.
   await consumeDailyBudget(env, packet.review_level);
-  return audit;
+  try {
+    return await invokeModel(env, selected, serialized);
+  } catch (error) {
+    await releaseDailyBudget(env, packet.review_level);
+    throw error;
+  }
 }
 
 function reviewCallLevel(value: unknown): "standard" | "deep" | null {
