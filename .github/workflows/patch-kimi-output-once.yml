@@ -1,0 +1,147 @@
+name: Patch Kimi tool output once
+
+on:
+  push:
+    branches: [fix/kimi-tool-output]
+    paths:
+      - '.github/workflows/patch-kimi-output-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/kimi-tool-output
+      - name: Patch Kimi structured output path
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('src/index.ts')
+          s = p.read_text()
+
+          old_version = 'const VERSION = "0.5.2";'
+          if old_version not in s:
+              raise SystemExit('version marker not found')
+          s = s.replace(old_version, 'const VERSION = "0.5.3";', 1)
+
+          marker = '''function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+'''
+          helper = '''function parseToolAudit(raw: unknown): AuditResult {
+  const root = asRecord(raw);
+  let calls: unknown[] | null = root && Array.isArray(root.tool_calls) ? root.tool_calls : null;
+
+  if ((!calls || calls.length === 0) && root && Array.isArray(root.choices)) {
+    const first = asRecord(root.choices[0]);
+    const message = asRecord(first?.message);
+    if (message && Array.isArray(message.tool_calls)) calls = message.tool_calls;
+  }
+
+  if (!calls || calls.length === 0) throw new Error("auditor_missing_tool_call");
+
+  for (const item of calls) {
+    const call = asRecord(item);
+    if (!call) continue;
+    const fn = asRecord(call.function);
+    const name = shortText(call.name ?? fn?.name, 64);
+    if (name !== "submit_audit") continue;
+
+    let args: unknown = call.arguments ?? fn?.arguments;
+    if (typeof args === "string") {
+      try {
+        args = JSON.parse(args);
+      } catch {
+        throw new Error("auditor_invalid_tool_arguments");
+      }
+    }
+    return normalizeAudit(args);
+  }
+
+  throw new Error("auditor_missing_submit_audit_call");
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+'''
+          if marker not in s:
+              raise SystemExit('parser insertion marker not found')
+          s = s.replace(marker, helper, 1)
+
+          old_invoke = '''async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
+  const kimi26 = isKimi26Model(model);
+  const input: Record<string, unknown> = {
+    messages: [
+      { role: "system", content: AUDITOR_PROMPT },
+      { role: "user", content: serialized },
+    ],
+    max_completion_tokens: kimi26 ? 512 : 360,
+    temperature: 0,
+    stream: false,
+  };
+
+  if (kimi26) {
+    // Kimi K2.6 uses chat_template_kwargs.thinking for reasoning control. Keep thinking
+    // off for this compact critic and require a schema-valid result instead of parsing prose.
+    input.chat_template_kwargs = { thinking: false };
+    input.response_format = {
+      type: "json_schema",
+      json_schema: AUDIT_JSON_SCHEMA,
+    };
+  } else {
+    input.reasoning_effort = "low";
+  }
+
+  return parseAudit(await env.AI.run(model, input));
+}
+'''
+          new_invoke = '''async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
+  const kimi26 = isKimi26Model(model);
+  const input: Record<string, unknown> = {
+    messages: [
+      { role: "system", content: AUDITOR_PROMPT },
+      { role: "user", content: serialized },
+    ],
+    max_completion_tokens: kimi26 ? 512 : 360,
+    temperature: 0,
+    stream: false,
+  };
+
+  if (kimi26) {
+    // Kimi K2.6 is a function-calling model. Workers AI JSON Mode does not list Kimi
+    // among its supported models, so force one schema-shaped tool call instead.
+    input.chat_template_kwargs = { thinking: false };
+    input.tools = [{
+      name: "submit_audit",
+      description: "Return the compact audit result. Call exactly once and do not answer in prose.",
+      parameters: AUDIT_JSON_SCHEMA,
+    }];
+    input.tool_choice = "required";
+    input.parallel_tool_calls = false;
+    return parseToolAudit(await env.AI.run(model, input));
+  }
+
+  input.reasoning_effort = "low";
+  return parseAudit(await env.AI.run(model, input));
+}
+'''
+          if old_invoke not in s:
+              raise SystemExit('invokeModel block not found')
+          s = s.replace(old_invoke, new_invoke, 1)
+          p.write_text(s)
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git diff --cached --check
+          git commit -m "Use Kimi function call for audit output"
+          git push origin HEAD:fix/kimi-tool-output
