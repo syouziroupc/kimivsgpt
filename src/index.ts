@@ -29,7 +29,7 @@ interface Env {
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.5.4";
+const VERSION = "0.5.5";
 const DEFAULT_DAILY_STANDARD_LIMIT = 100;
 const DEFAULT_DAILY_DEEP_LIMIT = 5;
 
@@ -405,21 +405,20 @@ async function enforceReviewRateLimit(request: Request, env: Env): Promise<Respo
   const messages = Array.isArray(body) ? body : [body];
   const levels = messages.map(reviewCallLevel).filter((level): level is "standard" | "deep" => level !== null);
   if (levels.length === 0) return null;
-  if (levels.length > 1) {
-    return Response.json({ error: "batched_review_calls_not_allowed" }, { status: 400 });
+
+  // MCP SDK v2 supports JSON-RPC batches. Meter every audit independently.
+  for (const level of levels) {
+    const limiter = level === "deep" ? env.DEEP_RATE_LIMITER : env.AUDIT_RATE_LIMITER;
+    if (!limiter) continue;
+    const { success } = await limiter.limit({ key: `review_strategy:${level}` });
+    if (!success) {
+      return Response.json(
+        { error: "rate_limit_exceeded", review_level: level, batch_size: levels.length },
+        { status: 429, headers: { "Retry-After": "60" } },
+      );
+    }
   }
-
-  const level = levels[0];
-  const limiter = level === "deep" ? env.DEEP_RATE_LIMITER : env.AUDIT_RATE_LIMITER;
-  if (!limiter) return null;
-
-  const { success } = await limiter.limit({ key: `review_strategy:${level}` });
-  if (success) return null;
-
-  return Response.json(
-    { error: "rate_limit_exceeded", review_level: level },
-    { status: 429, headers: { "Retry-After": "60" } },
-  );
+  return null;
 }
 
 function jsonWithCors(value: unknown, init: ResponseInit = {}): Response {
@@ -465,9 +464,9 @@ function oauthUnauthorized(origin: string): Response {
     status: 401,
     headers: {
       "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Expose-Headers": "WWW-Authenticate",
-  "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "WWW-Authenticate",
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -789,7 +788,8 @@ export default {
         standard_model: env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL,
         deep_model: env.AUDITOR_MODEL_DEEP || DEEP_MODEL,
         max_packet_chars: MAX_PACKET_CHARS,
-        oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256" },
+        oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256", refresh_replay_grace_seconds: 30 },
+        batch_review_calls: true,
         rate_limits: { standard_per_minute: 30, deep_per_minute: 3, auth_attempts_per_minute_per_ip: 10 },
         daily_limits: {
           standard: parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000),
