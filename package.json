@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "type-check": "tsc --noEmit",
     "build-check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
-    "audit": "npm audit --audit-level=high",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "audit:dev": "npm audit --audit-level=high",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "cf-typegen": "wrangler types"
   },
