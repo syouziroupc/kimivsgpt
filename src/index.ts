@@ -29,7 +29,7 @@ interface Env {
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 const DEFAULT_DAILY_STANDARD_LIMIT = 100;
 const DEFAULT_DAILY_DEEP_LIMIT = 5;
 
@@ -253,7 +253,9 @@ function parseAudit(raw: unknown): AuditResult {
 }
 
 function parseToolAudit(raw: unknown): AuditResult {
-  const root = asRecord(raw);
+  const rawRoot = asRecord(raw);
+  const responseRoot = rawRoot ? asRecord(rawRoot.response) : null;
+  const root = responseRoot ?? rawRoot;
   let calls: unknown[] | null = root && Array.isArray(root.tool_calls) ? root.tool_calls : null;
 
   if ((!calls || calls.length === 0) && root && Array.isArray(root.choices)) {
@@ -263,26 +265,30 @@ function parseToolAudit(raw: unknown): AuditResult {
   }
 
   if (!calls || calls.length === 0) throw new Error("auditor_missing_tool_call");
-
   for (const item of calls) {
     const call = asRecord(item);
     if (!call) continue;
     const fn = asRecord(call.function);
     const name = shortText(call.name ?? fn?.name, 64);
     if (name !== "submit_audit") continue;
-
     let args: unknown = call.arguments ?? fn?.arguments;
     if (typeof args === "string") {
-      try {
-        args = JSON.parse(args);
-      } catch {
-        throw new Error("auditor_invalid_tool_arguments");
-      }
+      try { args = JSON.parse(args); }
+      catch { throw new Error("auditor_invalid_tool_arguments"); }
     }
     return normalizeAudit(args);
   }
-
   throw new Error("auditor_missing_submit_audit_call");
+}
+
+function parseKimiAudit(raw: unknown): AuditResult {
+  try { return parseToolAudit(raw); }
+  catch (toolError) {
+    try { return parseAudit(raw); }
+    catch (textError) {
+      throw new Error(`auditor_kimi_output_unreadable:${errorText(toolError)}:${errorText(textError)}`);
+    }
+  }
 }
 
 function errorText(error: unknown): string {
@@ -308,14 +314,20 @@ function mcpResource(origin: string): string {
   return `${origin}/mcp`;
 }
 
+function dailyLimit(env: Env, level: "standard" | "deep"): number {
+  return level === "deep"
+    ? parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5)
+    : parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
+}
+
+async function checkDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+  const result = await getAuthState(env).checkUsage(level, dailyLimit(env, level));
+  if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+}
+
 async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
-  const standardLimit = parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
-  const deepLimit = parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5);
-  const limit = level === "deep" ? deepLimit : standardLimit;
-  const result = await getAuthState(env).consumeUsage(level, limit);
-  if (!result.allowed) {
-    throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
-  }
+  const result = await getAuthState(env).consumeUsage(level, dailyLimit(env, level));
+  if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
 }
 
 function isKimi26Model(model: string): boolean {
@@ -324,19 +336,20 @@ function isKimi26Model(model: string): boolean {
 
 async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
   const kimi26 = isKimi26Model(model);
+  const systemPrompt = kimi26
+    ? `${AUDITOR_PROMPT}
+For this request, do not print the audit JSON in message content. Call submit_audit exactly once with the complete audit object as its arguments.`
+    : AUDITOR_PROMPT;
   const input: Record<string, unknown> = {
     messages: [
-      { role: "system", content: AUDITOR_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: serialized },
     ],
     max_completion_tokens: kimi26 ? 512 : 360,
     temperature: 0,
     stream: false,
   };
-
   if (kimi26) {
-    // Kimi K2.6 is a function-calling model. Workers AI JSON Mode does not list Kimi
-    // among its supported models, so force one schema-shaped tool call instead.
     input.chat_template_kwargs = { thinking: false };
     input.tools = [{
       name: "submit_audit",
@@ -345,9 +358,8 @@ async function invokeModel(env: Env, model: string, serialized: string): Promise
     }];
     input.tool_choice = "required";
     input.parallel_tool_calls = false;
-    return parseToolAudit(await env.AI.run(model, input));
+    return parseKimiAudit(await env.AI.run(model, input));
   }
-
   input.reasoning_effort = "low";
   return parseAudit(await env.AI.run(model, input));
 }
@@ -362,9 +374,11 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
     throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
   }
 
-  // Reserve exactly one daily budget unit before the model call. No automatic model retry/fallback.
+  // Check quota before inference, but count only a successfully parsed audit.
+  await checkDailyBudget(env, packet.review_level);
+  const audit = await invokeModel(env, selected, serialized);
   await consumeDailyBudget(env, packet.review_level);
-  return invokeModel(env, selected, serialized);
+  return audit;
 }
 
 function reviewCallLevel(value: unknown): "standard" | "deep" | null {
@@ -449,7 +463,9 @@ function oauthUnauthorized(origin: string): Response {
     status: 401,
     headers: {
       "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
-      "Cache-Control": "no-store",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Expose-Headers": "WWW-Authenticate",
+  "Cache-Control": "no-store",
     },
   });
 }
@@ -737,7 +753,7 @@ export default {
         status: 204,
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Protocol-Version",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         },
       });

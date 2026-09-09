@@ -212,6 +212,13 @@ export class AuthState extends DurableObject {
     return record.resource === resource && record.scope.split(/\s+/).includes(OAUTH_SCOPE);
   }
 
+  async checkUsage(level: "standard" | "deep", limit: number): Promise<{ allowed: boolean; used: number; limit: number; day: string }> {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `usage:${day}:${level}`;
+  const current = Number((await this.ctx.storage.get(key)) ?? 0);
+  return { allowed: current < limit, used: current, limit, day };
+}
+
   async consumeUsage(level: "standard" | "deep", limit: number): Promise<{ allowed: boolean; used: number; limit: number; day: string }> {
     const day = new Date().toISOString().slice(0, 10);
     const key = `usage:${day}:${level}`;
