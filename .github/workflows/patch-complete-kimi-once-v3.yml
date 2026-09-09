@@ -1,0 +1,193 @@
+name: Minimal Kimi hardening patch once
+
+on:
+  push:
+    branches: [fix/kimi-complete-20260909]
+    paths: [.github/workflows/patch-complete-kimi-once-v3.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/kimi-complete-20260909
+      - name: Patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p=Path('src/index.ts'); s=p.read_text()
+          assert 'const VERSION = "0.5.3";' in s
+          s=s.replace('const VERSION = "0.5.3";','const VERSION = "0.5.4";',1)
+
+          # Accept both documented top-level tool_calls and wrapped response/choices shapes.
+          start=s.index('function parseToolAudit(raw: unknown): AuditResult {')
+          end=s.index('\nfunction errorText(', start)
+          s=s[:start]+'''function parseToolAudit(raw: unknown): AuditResult {
+            const rawRoot = asRecord(raw);
+            const responseRoot = rawRoot ? asRecord(rawRoot.response) : null;
+            const root = responseRoot ?? rawRoot;
+            let calls: unknown[] | null = root && Array.isArray(root.tool_calls) ? root.tool_calls : null;
+
+            if ((!calls || calls.length === 0) && root && Array.isArray(root.choices)) {
+              const first = asRecord(root.choices[0]);
+              const message = asRecord(first?.message);
+              if (message && Array.isArray(message.tool_calls)) calls = message.tool_calls;
+            }
+
+            if (!calls || calls.length === 0) throw new Error("auditor_missing_tool_call");
+            for (const item of calls) {
+              const call = asRecord(item);
+              if (!call) continue;
+              const fn = asRecord(call.function);
+              const name = shortText(call.name ?? fn?.name, 64);
+              if (name !== "submit_audit") continue;
+              let args: unknown = call.arguments ?? fn?.arguments;
+              if (typeof args === "string") {
+                try { args = JSON.parse(args); }
+                catch { throw new Error("auditor_invalid_tool_arguments"); }
+              }
+              return normalizeAudit(args);
+            }
+            throw new Error("auditor_missing_submit_audit_call");
+          }
+
+          function parseKimiAudit(raw: unknown): AuditResult {
+            try { return parseToolAudit(raw); }
+            catch (toolError) {
+              try { return parseAudit(raw); }
+              catch (textError) {
+                throw new Error(`auditor_kimi_output_unreadable:${errorText(toolError)}:${errorText(textError)}`);
+              }
+            }
+          }
+          '''+s[end:]
+
+          # Precheck daily limit but only debit quota after a valid audit is parsed.
+          start=s.index('async function consumeDailyBudget(env: Env')
+          end=s.index('\nfunction isKimi26Model(', start)
+          s=s[:start]+'''function dailyLimit(env: Env, level: "standard" | "deep"): number {
+            return level === "deep"
+              ? parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5)
+              : parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
+          }
+
+          async function checkDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+            const result = await getAuthState(env).checkUsage(level, dailyLimit(env, level));
+            if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+          }
+
+          async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+            const result = await getAuthState(env).consumeUsage(level, dailyLimit(env, level));
+            if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+          }
+          '''+s[end:]
+
+          # Kimi must call submit_audit; keep same-response JSON fallback for provider-shape drift.
+          start=s.index('async function invokeModel(env: Env')
+          end=s.index('\nasync function runReview(', start)
+          s=s[:start]+'''async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
+            const kimi26 = isKimi26Model(model);
+            const systemPrompt = kimi26
+              ? `${AUDITOR_PROMPT}\nFor this request, do not print the audit JSON in message content. Call submit_audit exactly once with the complete audit object as its arguments.`
+              : AUDITOR_PROMPT;
+            const input: Record<string, unknown> = {
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: serialized },
+              ],
+              max_completion_tokens: kimi26 ? 512 : 360,
+              temperature: 0,
+              stream: false,
+            };
+            if (kimi26) {
+              input.chat_template_kwargs = { thinking: false };
+              input.tools = [{
+                name: "submit_audit",
+                description: "Return the compact audit result. Call exactly once and do not answer in prose.",
+                parameters: AUDIT_JSON_SCHEMA,
+              }];
+              input.tool_choice = "required";
+              input.parallel_tool_calls = false;
+              return parseKimiAudit(await env.AI.run(model, input));
+            }
+            input.reasoning_effort = "low";
+            return parseAudit(await env.AI.run(model, input));
+          }
+          '''+s[end:]
+
+          old='''  // Reserve exactly one daily budget unit before the model call. No automatic model retry/fallback.
+            await consumeDailyBudget(env, packet.review_level);
+            return invokeModel(env, selected, serialized);
+          }'''.replace('            ','  ')
+          actual='''  // Reserve exactly one daily budget unit before the model call. No automatic model retry/fallback.
+          await consumeDailyBudget(env, packet.review_level);
+          return invokeModel(env, selected, serialized);
+          }'''
+          # Use a structural regex instead of whitespace-sensitive replacement.
+          pattern=r'  // Reserve exactly one daily budget unit before the model call\. No automatic model retry/fallback\.\n\s*await consumeDailyBudget\(env, packet\.review_level\);\n\s*return invokeModel\(env, selected, serialized\);\n}'
+          repl='''  // Check quota before inference, but count only a successfully parsed audit.
+            await checkDailyBudget(env, packet.review_level);
+            const audit = await invokeModel(env, selected, serialized);
+            await consumeDailyBudget(env, packet.review_level);
+            return audit;
+          }'''.replace('            ','  ')
+          s,n=re.subn(pattern,repl,s,count=1)
+          assert n==1, 'runReview replacement failed'
+
+          # Make OAuth challenge visible to browser/MCP clients across origins.
+          target='''      "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
+                "Cache-Control": "no-store",'''.replace('                ','      ')
+          replacement='''      "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "WWW-Authenticate",
+            "Cache-Control": "no-store",'''.replace('            ','      ')
+          assert target in s
+          s=s.replace(target,replacement,1)
+          s=s.replace('"Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Protocol-Version"','"Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name"',1)
+          p.write_text(s)
+
+          p=Path('src/auth.ts'); a=p.read_text()
+          marker='  async consumeUsage(level: "standard" | "deep", limit: number): Promise<{ allowed: boolean; used: number; limit: number; day: string }> {'
+          assert marker in a
+          check='''  async checkUsage(level: "standard" | "deep", limit: number): Promise<{ allowed: boolean; used: number; limit: number; day: string }> {
+            const day = new Date().toISOString().slice(0, 10);
+            const key = `usage:${day}:${level}`;
+            const current = Number((await this.ctx.storage.get(key)) ?? 0);
+            return { allowed: current < limit, used: current, limit, day };
+          }
+
+          '''.replace('          ','')
+          a=a.replace(marker,check+marker,1); p.write_text(a)
+
+          p=Path('package.json'); q=p.read_text(); q=q.replace('"version": "0.5.2"','"version": "0.5.4"',1); p.write_text(q)
+          p=Path('package-lock.json'); q=p.read_text(); assert q.count('"version": "0.5.2"')>=2; q=q.replace('"version": "0.5.2"','"version": "0.5.4"',2); p.write_text(q)
+          PY
+          git diff --check
+          grep -q 'const VERSION = "0.5.4"' src/index.ts
+          grep -q 'parseKimiAudit' src/index.ts
+          grep -q 'checkDailyBudget' src/index.ts
+          grep -q 'checkUsage' src/auth.ts
+      - name: Validate
+        run: |
+          set -euo pipefail
+          npm install
+          npm run audit
+          npm run type-check
+          npm run build-check
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/index.ts src/auth.ts package.json package-lock.json
+          git diff --cached --check
+          git commit -m 'Harden Kimi output parsing and quota accounting'
+          git push origin HEAD:fix/kimi-complete-20260909
