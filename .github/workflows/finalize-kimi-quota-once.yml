@@ -1,0 +1,118 @@
+name: Finalize Kimi quota hardening once
+
+on:
+  push:
+    branches: [fix/kimi-complete-20260909]
+    paths: [.github/workflows/finalize-kimi-quota-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/kimi-complete-20260909
+      - name: Patch quota reservation and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Durable Object: replace non-atomic precheck with refund operation.
+          p = Path('src/auth.ts')
+          s = p.read_text()
+          start = s.index('  async checkUsage(level: "standard" | "deep"')
+          end = s.index('\n  async consumeUsage(', start)
+          refund = '''  async releaseUsage(level: "standard" | "deep"): Promise<{ used: number; day: string }> {
+            const day = new Date().toISOString().slice(0, 10);
+            const key = `usage:${day}:${level}`;
+            const current = Number((await this.ctx.storage.get(key)) ?? 0);
+            const next = Math.max(0, current - 1);
+            if (next === 0) await this.ctx.storage.delete(key);
+            else await this.ctx.storage.put(key, next);
+            return { used: next, day };
+          }
+          '''.replace('          ', '')
+          s = s[:start] + refund + s[end:]
+          p.write_text(s)
+
+          p = Path('src/index.ts')
+          s = p.read_text()
+          start = s.index('function dailyLimit(env: Env')
+          end = s.index('\nfunction isKimi26Model(', start)
+          quota = '''function dailyLimit(env: Env, level: "standard" | "deep"): number {
+            return level === "deep"
+              ? parsePositiveInt(env.AUDITOR_DAILY_DEEP_LIMIT, DEFAULT_DAILY_DEEP_LIMIT, 5)
+              : parsePositiveInt(env.AUDITOR_DAILY_STANDARD_LIMIT, DEFAULT_DAILY_STANDARD_LIMIT, 10000);
+          }
+
+          async function consumeDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+            const result = await getAuthState(env).consumeUsage(level, dailyLimit(env, level));
+            if (!result.allowed) throw new Error(`daily_limit_exceeded:${level}:${result.used}/${result.limit}`);
+          }
+
+          async function releaseDailyBudget(env: Env, level: "standard" | "deep"): Promise<void> {
+            await getAuthState(env).releaseUsage(level);
+          }
+          '''.replace('          ', '')
+          s = s[:start] + quota + s[end:]
+
+          pattern = re.compile(
+              r'  // Check quota before inference, but count only a successfully parsed audit\.\n'
+              r'  await checkDailyBudget\(env, packet\.review_level\);\n'
+              r'  const audit = await invokeModel\(env, selected, serialized\);\n'
+              r'  await consumeDailyBudget\(env, packet\.review_level\);\n'
+              r'  return audit;'
+          )
+          replacement = '''  // Reserve one quota unit atomically. Failed model/output parsing is refunded.
+            await consumeDailyBudget(env, packet.review_level);
+            try {
+              return await invokeModel(env, selected, serialized);
+            } catch (error) {
+              await releaseDailyBudget(env, packet.review_level);
+              throw error;
+            }'''.replace('            ', '  ')
+          s, n = pattern.subn(replacement, s, count=1)
+          assert n == 1, 'runReview quota block not found'
+
+          # Normalize OAuth CORS header indentation only.
+          s = s.replace(
+              '''      "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Expose-Headers": "WWW-Authenticate",
+          "Cache-Control": "no-store",'''.replace('          ', '  '),
+              '''      "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${OAUTH_SCOPE}"`,
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "WWW-Authenticate",
+                "Cache-Control": "no-store",'''.replace('                ', '      '),
+              1,
+          )
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'releaseUsage' src/auth.ts
+          grep -q 'releaseDailyBudget' src/index.ts
+          ! grep -q 'checkDailyBudget' src/index.ts
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install
+          npm run audit
+          npm run type-check
+          npm run build-check
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/index.ts src/auth.ts
+          git diff --cached --check
+          git commit -m 'Make audit quota reservation atomic with failure refund'
+          git push origin HEAD:fix/kimi-complete-20260909
