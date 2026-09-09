@@ -1,20 +1,20 @@
 {
   "name": "kimi-vs-gpt-auditor",
-  "version": "0.5.3",
-  "description": "Automatically runs a compact independent review before complex ChatGPT and Codex answers.",
+  "version": "0.5.4",
+  "description": "Automatically runs a compact independent review before complex ChatGPT and Codex answers, with bounded web verification for fresh public facts.",
   "author": {
     "name": "syouziroupc",
     "url": "https://github.com/syouziroupc"
   },
   "homepage": "https://github.com/syouziroupc/kimivsgpt",
   "repository": "https://github.com/syouziroupc/kimivsgpt",
-  "keywords": ["review", "critic", "reasoning", "verification", "second-opinion", "quality-control", "automatic-review"],
+  "keywords": ["review", "critic", "reasoning", "verification", "web-verification", "second-opinion", "quality-control", "automatic-review"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kimi vs GPT Answer Auditor",
-    "shortDescription": "Automatic second opinion before complex answers",
-    "longDescription": "Automatically adds one compact independent pre-answer review for complex analysis, research, troubleshooting, planning, recommendations, comparisons, and architecture decisions. Standard review is used for ordinary complex work; deep Kimi review is reserved for high-stakes, unusually disputed, weak-evidence, or explicitly rigorous tasks. The external critic does not draft the final answer, perform the primary research, or generate complete code.",
+    "shortDescription": "Automatic second opinion with bounded fact verification",
+    "longDescription": "Automatically adds one compact independent pre-answer review for complex analysis, research, troubleshooting, planning, recommendations, comparisons, and architecture decisions. When a material conclusion depends on fresh public facts, the host may perform one narrow web verification pass and send only compressed source evidence into the review packet. Standard review is used for ordinary complex work; deep Kimi review is reserved for high-stakes, unusually disputed, weak-evidence, or explicitly rigorous tasks. The external critic does not browse autonomously, draft the final answer, perform open-ended primary research, or generate complete code.",
     "developerName": "syouziroupc",
     "category": "Productivity",
     "capabilities": ["Read"],
