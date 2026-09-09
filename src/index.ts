@@ -29,7 +29,7 @@ interface Env {
 const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 const DEFAULT_DAILY_STANDARD_LIMIT = 100;
 const DEFAULT_DAILY_DEEP_LIMIT = 5;
 
@@ -252,6 +252,39 @@ function parseAudit(raw: unknown): AuditResult {
   return normalizeAudit(value);
 }
 
+function parseToolAudit(raw: unknown): AuditResult {
+  const root = asRecord(raw);
+  let calls: unknown[] | null = root && Array.isArray(root.tool_calls) ? root.tool_calls : null;
+
+  if ((!calls || calls.length === 0) && root && Array.isArray(root.choices)) {
+    const first = asRecord(root.choices[0]);
+    const message = asRecord(first?.message);
+    if (message && Array.isArray(message.tool_calls)) calls = message.tool_calls;
+  }
+
+  if (!calls || calls.length === 0) throw new Error("auditor_missing_tool_call");
+
+  for (const item of calls) {
+    const call = asRecord(item);
+    if (!call) continue;
+    const fn = asRecord(call.function);
+    const name = shortText(call.name ?? fn?.name, 64);
+    if (name !== "submit_audit") continue;
+
+    let args: unknown = call.arguments ?? fn?.arguments;
+    if (typeof args === "string") {
+      try {
+        args = JSON.parse(args);
+      } catch {
+        throw new Error("auditor_invalid_tool_arguments");
+      }
+    }
+    return normalizeAudit(args);
+  }
+
+  throw new Error("auditor_missing_submit_audit_call");
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -302,17 +335,20 @@ async function invokeModel(env: Env, model: string, serialized: string): Promise
   };
 
   if (kimi26) {
-    // Kimi K2.6 uses chat_template_kwargs.thinking for reasoning control. Keep thinking
-    // off for this compact critic and require a schema-valid result instead of parsing prose.
+    // Kimi K2.6 is a function-calling model. Workers AI JSON Mode does not list Kimi
+    // among its supported models, so force one schema-shaped tool call instead.
     input.chat_template_kwargs = { thinking: false };
-    input.response_format = {
-      type: "json_schema",
-      json_schema: AUDIT_JSON_SCHEMA,
-    };
-  } else {
-    input.reasoning_effort = "low";
+    input.tools = [{
+      name: "submit_audit",
+      description: "Return the compact audit result. Call exactly once and do not answer in prose.",
+      parameters: AUDIT_JSON_SCHEMA,
+    }];
+    input.tool_choice = "required";
+    input.parallel_tool_calls = false;
+    return parseToolAudit(await env.AI.run(model, input));
   }
 
+  input.reasoning_effort = "low";
   return parseAudit(await env.AI.run(model, input));
 }
 
