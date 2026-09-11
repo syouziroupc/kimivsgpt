@@ -1,0 +1,53 @@
+name: review-smoke-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[review-smoke]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AUDITOR_ACCESS_KEY: ${{ secrets.AUDITOR_ACCESS_KEY }}
+    steps:
+      - name: Require smoke credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AUDITOR_ACCESS_KEY"
+      - name: Call standard review
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          payload='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"review_strategy","arguments":{"user_request":"Choose a deployment approach.","proposed_direction":"Use the already validated production path.","key_claims":["The production health endpoint is current."],"assumptions":[],"evidence":["The health check returned the expected version."],"constraints":["Keep the audit concise."],"uncertainties":[],"review_level":"standard"}}}'
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $AUDITOR_ACCESS_KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data "$payload" "$base/mcp" | tee /tmp/standard.txt
+          ! grep -q 'auditor_invalid_json' /tmp/standard.txt
+          ! grep -q 'audit_failed' /tmp/standard.txt
+          grep -Eq '"verdict"|\\"verdict\\"' /tmp/standard.txt
+      - name: Call deep review
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://kimivsgpt.syouziroupc.workers.dev'
+          payload='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"review_strategy","arguments":{"user_request":"Assess a consequential production change.","proposed_direction":"Ship only after health and runtime verification.","key_claims":["The application-level daily deep quota is removed."],"assumptions":[],"evidence":["Production health reports application_quota none."],"constraints":["Return a schema-valid audit."],"uncertainties":[],"review_level":"deep"}}}'
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $AUDITOR_ACCESS_KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H 'MCP-Protocol-Version: 2025-03-26' \
+            --data "$payload" "$base/mcp" | tee /tmp/deep.txt
+          ! grep -q 'auditor_invalid_json' /tmp/deep.txt
+          ! grep -q 'audit_failed' /tmp/deep.txt
+          ! grep -q 'daily_limit_exceeded' /tmp/deep.txt
+          grep -Eq '"verdict"|\\"verdict\\"' /tmp/deep.txt
