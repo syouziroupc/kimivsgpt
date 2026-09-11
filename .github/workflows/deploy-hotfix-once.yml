@@ -20,16 +20,23 @@ jobs:
       - run: npm install
       - name: Validate Worker bundle
         run: npm run build-check
-      - name: Deploy production Worker
-        run: npm run deploy
+      - name: Deploy directly when Cloudflare token is configured
+        shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            npm run deploy
+          else
+            echo 'Cloudflare deployment credentials are not configured in GitHub Actions; relying on the repository Cloudflare integration and verifying production below.'
+          fi
       - name: Verify production health
         shell: bash
         run: |
           set -euo pipefail
-          for i in {1..12}; do
+          for i in {1..18}; do
             body="$(curl --fail --silent --show-error --max-time 15 https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
             if printf '%s' "$body" | grep -q '"version":"0.8.0-reliable"' \
