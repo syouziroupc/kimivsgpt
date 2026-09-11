@@ -7,10 +7,11 @@ const EXPECTED_AUDIENCE = "kimivsgpt-hotfix-smoke";
 const EXPECTED_REPOSITORY = "syouziroupc/kimivsgpt";
 const EXPECTED_REF = "refs/heads/main";
 
-function b64urlBytes(value: string): Uint8Array {
+function b64urlBytes(value: string): ArrayBuffer {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4);
   const binary = atob(padded);
-  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return bytes.buffer as ArrayBuffer;
 }
 
 function b64urlJson(value: string): any {

@@ -262,8 +262,9 @@ function parseToolAudit(raw: unknown): AuditResult {
     if (name !== "submit_audit") continue;
     let args: unknown = call.arguments ?? fn?.arguments;
     if (typeof args === "string") {
-      try { args = JSON.parse(args); }
-      catch { args = parseJsonString(args); }
+      const argText = args;
+      try { args = JSON.parse(argText); }
+      catch { args = parseJsonString(argText); }
     }
     return normalizeAudit(args);
   }
