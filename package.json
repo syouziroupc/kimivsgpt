@@ -12,7 +12,8 @@
     "audit:dev": "npm audit --audit-level=high",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "cf-typegen": "wrangler types",
-    "test:concurrency": "node scripts/verify-concurrency-contract.mjs"
+    "test:concurrency": "node scripts/verify-concurrency-contract.mjs",
+    "test:reliability": "node scripts/verify-reliability-contract.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",

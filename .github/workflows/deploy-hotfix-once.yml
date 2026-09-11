@@ -32,11 +32,13 @@ jobs:
           for i in {1..12}; do
             body="$(curl --fail --silent --show-error --max-time 15 https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"version":"0.7.0-resilient"' \
-              && printf '%s' "$body" | grep -q '"application_quota":"none"'; then
+            if printf '%s' "$body" | grep -q '"version":"0.8.0-reliable"' \
+              && printf '%s' "$body" | grep -q '"application_quota":"none"' \
+              && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
+              && printf '%s' "$body" | grep -q '"rpc_error_fallback":true'; then
               exit 0
             fi
             sleep 5
           done
-          echo 'Production health did not reach expected hotfix version.' >&2
+          echo 'Production health did not reach expected reliable version.' >&2
           exit 1

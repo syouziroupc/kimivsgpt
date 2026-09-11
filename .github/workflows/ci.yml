@@ -15,6 +15,7 @@ jobs:
       - run: npm run audit
       - run: npm run type-check
       - run: npm run test:concurrency
+      - run: npm run test:reliability
       - run: npm run build-check
       - name: Validate plugin JSON
         shell: bash
