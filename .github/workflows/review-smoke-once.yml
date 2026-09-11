@@ -6,28 +6,32 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   smoke:
     if: contains(github.event.head_commit.message, '[review-smoke]')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      AUDITOR_ACCESS_KEY: ${{ secrets.AUDITOR_ACCESS_KEY }}
     steps:
-      - name: Require smoke credential
+      - name: Acquire short-lived GitHub OIDC token
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$AUDITOR_ACCESS_KEY"
+          token_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=kimivsgpt-hotfix-smoke")"
+          token="$(printf '%s' "$token_json" | python -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          test -n "$token"
+          echo "SMOKE_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
       - name: Call standard review
         shell: bash
         run: |
           set -euo pipefail
           base='https://kimivsgpt.syouziroupc.workers.dev'
           payload='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"review_strategy","arguments":{"user_request":"Choose a deployment approach.","proposed_direction":"Use the already validated production path.","key_claims":["The production health endpoint is current."],"assumptions":[],"evidence":["The health check returned the expected version."],"constraints":["Keep the audit concise."],"uncertainties":[],"review_level":"standard"}}}'
-          curl --fail --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer $AUDITOR_ACCESS_KEY" \
+          curl --fail --silent --show-error --max-time 35 \
+            -H "x-github-oidc: $SMOKE_OIDC_TOKEN" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json, text/event-stream' \
             -H 'MCP-Protocol-Version: 2025-03-26' \
@@ -43,8 +47,8 @@ jobs:
           for i in 1 2 3 4 5; do
             payload="{\"jsonrpc\":\"2.0\",\"id\":$((100+i)),\"method\":\"tools/call\",\"params\":{\"name\":\"review_strategy\",\"arguments\":{\"user_request\":\"Assess a consequential production change.\",\"proposed_direction\":\"Ship only after health and runtime verification.\",\"key_claims\":[\"The application-level review quota is removed.\"],\"assumptions\":[],\"evidence\":[\"Production health reports review_rate_limit none.\"],\"constraints\":[\"Return a schema-valid audit.\"],\"uncertainties\":[],\"review_level\":\"deep\"}}}"
             out="/tmp/deep-$i.txt"
-            curl --fail --silent --show-error --max-time 30 \
-              -H "Authorization: Bearer $AUDITOR_ACCESS_KEY" \
+            curl --fail --silent --show-error --max-time 35 \
+              -H "x-github-oidc: $SMOKE_OIDC_TOKEN" \
               -H 'Content-Type: application/json' \
               -H 'Accept: application/json, text/event-stream' \
               -H 'MCP-Protocol-Version: 2025-03-26' \
