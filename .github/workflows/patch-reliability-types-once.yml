@@ -1,0 +1,61 @@
+name: patch-reliability-types-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[patch-reliability-types]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Fix strict TypeScript compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/index-oidc-smoke.ts')
+          s = p.read_text(encoding='utf-8')
+          old = '''function b64urlBytes(value: string): Uint8Array {\n  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4);\n  const binary = atob(padded);\n  return Uint8Array.from(binary, (c) => c.charCodeAt(0));\n}'''
+          new = '''function b64urlBytes(value: string): ArrayBuffer {\n  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4);\n  const binary = atob(padded);\n  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));\n  return bytes.buffer as ArrayBuffer;\n}'''
+          if old not in s:
+              raise SystemExit('OIDC byte-buffer patch target not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          p = Path('src/index-resilient.ts')
+          s = p.read_text(encoding='utf-8')
+          old = '''    let args: unknown = call.arguments ?? fn?.arguments;\n    if (typeof args === "string") {\n      try { args = JSON.parse(args); }\n      catch { args = parseJsonString(args); }\n    }'''
+          new = '''    let args: unknown = call.arguments ?? fn?.arguments;\n    if (typeof args === "string") {\n      const argText = args;\n      try { args = JSON.parse(argText); }\n      catch { args = parseJsonString(argText); }\n    }'''
+          if old not in s:
+              raise SystemExit('Kimi tool-argument patch target not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+      - name: Validate all reliability checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run type-check
+          npm run test:concurrency
+          npm run test:reliability
+          npm run build-check
+      - name: Commit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'syouziroupc'
+          git config user.email 'syouziroupc@gmail.com'
+          git add src/index-oidc-smoke.ts src/index-resilient.ts
+          git commit -m 'Fix strict TypeScript compatibility for reliable auditor'
+          git push origin HEAD:main
