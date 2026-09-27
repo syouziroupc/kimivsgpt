@@ -29,7 +29,7 @@ const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
 const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
 const KIMI_FALLBACK_MODEL = "@cf/moonshotai/kimi-k2.7-code";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.7.0-resilient";
+const VERSION = "0.7.1-resilient";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -297,6 +297,43 @@ function isKimiModel(model: string): boolean {
   return model.includes("moonshotai/kimi-");
 }
 
+function isKimi26Model(model: string): boolean {
+  return model.includes("moonshotai/kimi-k2.6");
+}
+
+function shouldRetrySameModel(error: string): boolean {
+  const normalized = error.toLowerCase();
+  const failoverNow = [
+    "auditor_model_timeout:",
+    "auditor_skip_retry_after_timeout:",
+    "auditor_inference_budget_exhausted:",
+    "capacity temporarily exceeded",
+    "out of capacity",
+    "model requires workers paid plan",
+    "daily free allocation",
+    "account limited",
+    "5035",
+    "3040",
+    "3036",
+    "http 429",
+    "status 429",
+    "http 403",
+    "status 403",
+  ];
+  if (failoverNow.some((marker) => normalized.includes(marker))) return false;
+
+  return [
+    "auditor_invalid_json",
+    "auditor_returned_no_json",
+    "auditor_returned_non_object_json",
+    "auditor_missing_tool_call",
+    "auditor_missing_submit_audit_call",
+    "auditor_invalid_tool_arguments",
+    "auditor_kimi_output_unreadable",
+    "auditor_empty_content",
+  ].some((marker) => normalized.includes(marker));
+}
+
 function candidateModels(env: Env, level: "standard" | "deep"): string[] {
   const configured = level === "deep"
     ? env.AUDITOR_MODEL_DEEP || DEEP_MODEL
@@ -327,7 +364,11 @@ async function invokeModel(env: Env, model: string, serialized: string, level: "
   };
 
   if (kimi) {
-    input.chat_template_kwargs = { thinking: level === "deep" && !retry };
+    // This auditor needs a short, forced structured result, not long-form chain reasoning.
+    // K2.6 defaults to high reasoning, which can consume the whole bounded request window
+    // before the required tool call is emitted. Disable it explicitly.
+    input.chat_template_kwargs = { thinking: false };
+    if (isKimi26Model(model)) input.reasoning_effort = "none";
     input.tools = [{
       name: "submit_audit",
       description: "Return the compact audit result. Call exactly once and do not answer in prose.",
@@ -357,6 +398,13 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
         return await invokeModel(env, model, serialized, packet.review_level, attempt > 0);
       } catch (error) {
         lastError = errorText(error);
+        console.warn("auditor_model_attempt_failed", JSON.stringify({
+          model,
+          level: packet.review_level,
+          attempt: attempt + 1,
+          error: lastError.slice(0, 300),
+        }));
+        if (!shouldRetrySameModel(lastError)) break;
       }
     }
   }
