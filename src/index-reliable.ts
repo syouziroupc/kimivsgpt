@@ -2,10 +2,10 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 
 export { AuthState };
 
-const VERSION = "0.8.0-reliable";
-const MODEL_CALL_TIMEOUT_MS = 9000;
-const INFERENCE_BUDGET_MS = 22000;
-const MCP_REQUEST_DEADLINE_MS = 26000;
+const VERSION = "0.8.1-reliable";
+const MODEL_CALL_TIMEOUT_MS = 12000;
+const INFERENCE_BUDGET_MS = 24500;
+const MCP_REQUEST_DEADLINE_MS = 28000;
 
 type AiBinding = {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
