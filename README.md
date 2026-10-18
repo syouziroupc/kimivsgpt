@@ -66,9 +66,9 @@ request deadlines, the original six fields, and the one-host-call workflow
 are unchanged.
 
 **Illustrative price comparison (NOT a measured bill).** If a review formerly
-used 1,500 input/150 output tokens per critic and compression achieves 700/90,
-Cloudflare model rates give standard $0.0003198 → $0.00016618 (48% lower),
-and deep $0.00066675 → $0.00032985 (50.5% lower). Actual tokenization,
+used 1,500 input/150 output tokens per critic and compression achieves 1,300/90,
+Cloudflare model rates give standard $0.0003198 → $0.00024328 (23.9% lower),
+and deep $0.00066675 → $0.00054045 (18.9% lower). Actual tokenization,
 JSON completion rate, free allowances, and model quality still require
 live observation. Neither a character cap nor `max_tokens` alone guarantees
 a monetary amount.
