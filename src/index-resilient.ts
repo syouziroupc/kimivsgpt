@@ -561,7 +561,7 @@ async function invokeEnsembleMember(
 ): Promise<AuditResult> {
   const input: Record<string, unknown> = {
     messages: [
-      { role: "system", content: `${COMPACT_AUDITOR_PROMPT} ${role.instruction}` },
+      { role: "system", content: `${role.model.includes("/qwen/") ? "/no_think\\n" : ""}${COMPACT_AUDITOR_PROMPT} ${role.instruction}` },
       { role: "user", content: serialized },
     ],
     max_tokens: role.maxOutputTokens,
