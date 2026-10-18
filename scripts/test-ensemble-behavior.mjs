@@ -14,7 +14,7 @@ for (const statement of ast.statements) {
       }
     }
   } else if (ts.isFunctionDeclaration(statement) && ["runReviewEnsemble", "compactReviewPacket"].includes(statement.name?.text)) {
-    selections.set("runReviewEnsemble", statement.getText(ast));
+    selections.set(statement.name.text, statement.getText(ast));
   }
 }
 for (const key of ["STANDARD_ENSEMBLE", "DEEP_ENSEMBLE", "compactReviewPacket", "runReviewEnsemble"]) {
