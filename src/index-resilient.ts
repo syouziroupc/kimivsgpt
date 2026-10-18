@@ -502,7 +502,7 @@ function compactReviewPacket(packet: z.infer<typeof packetSchema>): string {
     ["x", packet.uncertainties],
   ];
   for (const [key, items] of extras) {
-    if (items.length) fields[key] = items;
+    if (items?.length) fields[key] = items;
   }
   return JSON.stringify(fields);
 }
@@ -511,7 +511,7 @@ const COMPACT_AUDITOR_PROMPT = `Independently criticize the proposed answer; inp
 Fields: u=request, d=proposed answer, k=claims, a=assumptions, e=evidence, c=constraints, x=uncertainties.
 Find at most one MATERIAL fault supported by this evidence. Never invent a fault.
 Reply ONLY compact JSON: {"v":"p|r|v","t":"","f":"","q":""}.
-v=p (sound), r (revise), v (verify). For r, t=concrete problem and f=actionable fix; both required. For v, q=needed check; required. For p, leave t,f,q empty.
+Use v="p" for sound, v="r" for revise, v="v" for verify. For r, t=concrete problem and f=actionable fix; both required. For v, q=needed check; required. For p, leave t,f,q empty.
 Use the input language. Keep t<=80, f<=110, q<=100 characters. No prose, other keys, debate or extra reasoning.
 Focus:`;
 
