@@ -25,6 +25,7 @@ const compiled = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
 ).outputText;
 const results = new Map();
+let mockInvoke = null;
 const context = {
   module: { exports: {} },
   console: { info() {}, warn() {} },
@@ -33,6 +34,7 @@ const context = {
   resultSchema: { parse: (x) => x },
   errorText: (x) => String(x),
   invokeEnsembleMember: async (_env, role) => {
+    if (mockInvoke) return mockInvoke(role);
     const value = results.get(role.model);
     if (value === "fail") throw new Error("mock upstream failure");
     return value;
@@ -45,6 +47,7 @@ const qwen = "@cf/qwen/qwen3-30b-a3b-fp8";
 const glm = "@cf/zai-org/glm-4.7-flash";
 const gemma = "@cf/google/gemma-4-26b-a4b-it";
 const gptoss = "@cf/openai/gpt-oss-20b";
+const granite = "@cf/ibm-granite/granite-4.0-h-micro";
 const report = (verdict, risk, type = "evidence_gap") => ({
   verdict, risk, issues: verdict === "proceed" ? [] : [{ type, target: type, correction: "Action" }],
   verify: verdict === "verify" ? ["Verify source"] : [],
@@ -53,10 +56,12 @@ const report = (verdict, risk, type = "evidence_gap") => ({
 const packet = { user_request: "Test", proposed_direction: "Test", review_level: "standard" };
 results.set(qwen, report("proceed", 0));
 results.set(glm, report("revise", 3, "missing_alternative"));
+results.set(granite, report("proceed", 0));
 let res = await runReviewEnsemble({}, packet);
 assert.equal(res.verdict, "revise");
 assert.equal(res.risk, 3);
-assert.equal(res.perspectives.length, 2);
+assert.equal(res.perspectives.length, 3);
+assert.ok(res.perspectives.some((r) => r.model === granite));
 assert.ok(res.perspectives.every((r) => r.status === "ok"));
 assert.equal(res.issues.length, 1);
 
@@ -67,7 +72,30 @@ assert.equal(res.perspectives.filter((r) => r.status === "unavailable").length, 
 assert.ok(res.issues.some((issue) => issue.type === "evidence_gap"));
 
 results.set(qwen, "fail");
+results.set(granite, "fail");
 await assert.rejects(runReviewEnsemble({}, packet), /auditor_ensemble_all_models_failed/);
+
+// Three models must be STARTED before any result becomes available.
+// Test both standard and deep explicitly; this catches accidental sequential fallback.
+for (const level of ["standard", "deep"]) {
+  const starts = [];
+  let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  mockInvoke = async (role) => {
+    starts.push(role.model);
+    await barrier;
+    return report("proceed", 0);
+  };
+  const pending = runReviewEnsemble({}, { ...packet, review_level: level });
+  assert.equal(starts.length, 3, `Expected 3 simultaneous critics in ${level}`);
+  assert.equal(new Set(starts).size, 3, "Critics must be different models");
+  release();
+  const audit = await pending;
+  assert.equal(audit.verdict, "proceed");
+  assert.equal(audit.perspectives.length, 3);
+  assert.ok(audit.perspectives.every((r) => r.status === "ok"));
+}
+mockInvoke = null;
 
 results.set(qwen, report("proceed", 0));
 results.set(gemma, report("verify", 2, "unsupported"));
