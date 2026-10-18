@@ -106,4 +106,7 @@ const data = JSON.parse(costLog[1]);
 const expected = (500 * 0.017 + 50 * 0.112) / 1e6;
 assert.ok(Math.abs(data.estimated_inference_usd - expected) < 1e-12);
 assert.ok(!JSON.stringify(reports).includes(sample.user_request), "usage log must not retain the original prompt");
+const qwenRole = { ...role, model: "@cf/qwen/qwen3-30b-a3b-fp8" };
+await invokeEnsembleMember(mock, qwenRole, compact);
+assert.ok(sent.input.messages[0].content.startsWith("/no_think\n"), "Qwen prompt should disable lengthy reasoning");
 console.log("lossless compact protocol and cost telemetry OK");
