@@ -27,7 +27,7 @@ Review complex work such as multi-step analysis, research, troubleshooting with 
 
 Skip trivial chat, deterministic calculations, straightforward rewriting/translation, simple verified lookups, and purely creative generation.
 
-The critic never writes the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
+The critics never write the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
 
 ## Independent multi-model review and cost controls
 
@@ -35,12 +35,15 @@ The active Worker entrypoint is `src/index-reliable.ts`, which delegates to
 `src/index-resilient.ts`. The reviewer now uses **independent parallel reviews**
 instead of returning the first valid result in a sequential expensive fallback chain.
 
-- Standard: `@cf/qwen/qwen3-30b-a3b-fp8` (logic/evidence) and
-  `@cf/zai-org/glm-4.7-flash` (alternatives and blind spots).
-- Deep: `@cf/qwen/qwen3-30b-a3b-fp8`,
+- Standard: **three simultaneous independent critics**:
+  `@cf/qwen/qwen3-30b-a3b-fp8` (logic/evidence),
+  `@cf/zai-org/glm-4.7-flash` (alternatives and blind spots),
+  and `@cf/ibm-granite/granite-4.0-h-micro` (explicit constraints).
+  The third critic is deliberately small and cheap; validate its review quality.
+- Deep: **three simultaneous independent critics**: `@cf/qwen/qwen3-30b-a3b-fp8`,
   `@cf/google/gemma-4-26b-a4b-it`, and
   `@cf/openai/gpt-oss-20b`.
-- All reviewers receive the same bounded review packet, run once in parallel,
+- Exactly three reviewers receive the same bounded review packet, start together, run once in parallel,
   and must produce compact structured feedback.
 - Deterministic aggregation prioritizes material risks without letting
   reviewers read or influence one another's opinions.
