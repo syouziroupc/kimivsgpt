@@ -29,17 +29,35 @@ Skip trivial chat, deterministic calculations, straightforward rewriting/transla
 
 The critic never writes the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
 
-## Cost controls
+## Independent multi-model review and cost controls
 
-- Standard model: `@cf/zai-org/glm-5.3-flash`
-- Deep model: `@cf/moonshotai/kimi-k2.6`
-- Kimi is reserved for materially high-stakes, irreversible, security-sensitive, or unusually disputed decisions; task length alone does not justify it
-- Completion cap: 360 tokens
-- Review packet hard cap: 5,000 characters
-- Maximum three issues and two verification requests
-- One review call per substantive answer by default
-- Standard review uses one model call; minor schema variation is normalized locally rather than retried
-- Cloudflare rate limits: standard 30/minute, deep 3/minute
+The active Worker entrypoint is `src/index-reliable.ts`, which delegates to
+`src/index-resilient.ts`. The reviewer now uses **independent parallel reviews**
+instead of returning the first valid result in a sequential expensive fallback chain.
+
+- Standard: `@cf/qwen/qwen3-30b-a3b-fp8` (logic/evidence) and
+  `@cf/zai-org/glm-4.7-flash` (alternatives and blind spots).
+- Deep: `@cf/qwen/qwen3-30b-a3b-fp8`,
+  `@cf/google/gemma-4-26b-a4b-it`, and
+  `@cf/openai/gpt-oss-20b`.
+- All reviewers receive the same bounded review packet, run once in parallel,
+  and must produce compact structured feedback.
+- Deterministic aggregation prioritizes material risks without letting
+  reviewers read or influence one another's opinions.
+- `perspectives` is an optional additive output field exposing each
+  independent review and marking failed or unavailable members explicitly.
+- An unavailable member never becomes a fictitious vote. Remaining results
+  are marked partial; an all-failed run returns the existing safe fallback.
+- No Kimi or other paid-frontier-model escalation on the default path.
+  Set `AUDITOR_MODE=legacy` only for controlled comparison/rollback.
+- Existing OAuth, `/mcp`, input packet, six standard output fields,
+  packet-size validation and server request deadlines are preserved.
+- The actual invoice depends on input/output tokens and model usage.
+  Model-level telemetry records latency and available token usage without
+  request contents. Verify price/quality against real production traces
+  before claiming measured savings.
+
+Relevant pricing: https://developers.cloudflare.com/workers-ai/platform/pricing/
 
 ## Try as a local personal plugin on Windows
 
