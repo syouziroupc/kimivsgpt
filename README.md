@@ -29,38 +29,53 @@ Skip trivial chat, deterministic calculations, straightforward rewriting/transla
 
 The critics never write the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
 
-## Independent multi-model review and cost controls
+## Independent multi-model reviews and bounded inference cost
 
-The active Worker entrypoint is `src/index-reliable.ts`, which delegates to
-`src/index-resilient.ts`. The reviewer now uses **independent parallel reviews**
-instead of returning the first valid result in a sequential expensive fallback chain.
+The active entrypoint remains `src/index-reliable.ts`; three independent
+reviewers begin in parallel for both standard and deep modes. Reviewers do not
+see or debate one another's output. Responses preserve the existing MCP
+`review_strategy` six-field result and add optional per-model `perspectives`.
 
-- Standard: **three simultaneous independent critics**:
-  `@cf/qwen/qwen3-30b-a3b-fp8` (logic/evidence),
-  `@cf/zai-org/glm-4.7-flash` (alternatives and blind spots),
-  and `@cf/ibm-granite/granite-4.0-h-micro` (explicit constraints).
-  The third critic is deliberately small and cheap; validate its review quality.
-- Deep: **three simultaneous independent critics**: `@cf/qwen/qwen3-30b-a3b-fp8`,
-  `@cf/google/gemma-4-26b-a4b-it`, and
-  `@cf/openai/gpt-oss-20b`.
-- Exactly three reviewers receive the same bounded review packet, start together, run once in parallel,
-  and must produce compact structured feedback.
-- Deterministic aggregation prioritizes material risks without letting
-  reviewers read or influence one another's opinions.
-- `perspectives` is an optional additive output field exposing each
-  independent review and marking failed or unavailable members explicitly.
-- An unavailable member never becomes a fictitious vote. Remaining results
-  are marked partial; an all-failed run returns the existing safe fallback.
-- No Kimi or other paid-frontier-model escalation on the default path.
-  Set `AUDITOR_MODE=legacy` only for controlled comparison/rollback.
-- Existing OAuth, `/mcp`, input packet, six standard output fields,
-  packet-size validation and server request deadlines are preserved.
-- The actual invoice depends on input/output tokens and model usage.
-  Model-level telemetry records latency and available token usage without
-  request contents. Verify price/quality against real production traces
-  before claiming measured savings.
+**Standard:** Qwen3-30B-A3B-FP8 (evidence), GLM-4.7 Flash (alternatives),
+IBM Granite 4.0 H Micro (explicit constraints).
+**Deep:** Qwen3-30B-A3B-FP8, Gemma 4 26B A4B IT, GPT-OSS 20B.
 
-Relevant pricing: https://developers.cloudflare.com/workers-ai/platform/pricing/
+The cost-saving pipeline uses **no fourth model or secondary compression API**:
+
+1. Accept the same public review packet; validate its original 5,000-character
+   upper bound and keep every populated field unchanged.
+2. Convert field names to short local aliases (`u,d,k,a,e,c,x`) and omit
+   empty optional arrays. This operation preserves all supplied content.
+3. Reject a compact packet exceeding **2,400 characters before launching any
+   inference**. Do not silently cut claims, constraints, or evidence. Return
+   an explicit no-inference cost-guard verdict.
+4. Run three independent critics simultaneously. A brief system instruction
+   requests one material finding using `{v,t,f,q}` and a **200-token maximum
+   generated output per critic**.
+5. Convert small-model responses locally into the original audit shape;
+   missing/malformed output becomes an unavailable perspective, never a
+   manufactured agreement. Do not automatically retry or escalate to Kimi.
+6. Log model ID, reported input/output token usage, elapsed time and
+   an estimated USD variable inference cost when usage data is provided.
+   Never log user prompts or private evidence. Cloudflare daily free
+   Neuron allowances and other service fees are outside this estimate.
+
+The explicit `AUDITOR_MODE=legacy` switch remains for comparison/rollback;
+it is not part of the normal low-cost review path. OAuth, `/mcp`, Worker
+request deadlines, the original six fields, and the one-host-call workflow
+are unchanged.
+
+**Illustrative price comparison (NOT a measured bill).** If a review formerly
+used 1,500 input/150 output tokens per critic and compression achieves 700/90,
+Cloudflare model rates give standard $0.0003198 → $0.00016618 (48% lower),
+and deep $0.00066675 → $0.00032985 (50.5% lower). Actual tokenization,
+JSON completion rate, free allowances, and model quality still require
+live observation. Neither a character cap nor `max_tokens` alone guarantees
+a monetary amount.
+
+Official unit prices: https://developers.cloudflare.com/workers-ai/platform/pricing/
+Tests: `npm run test:ensemble:behavior`, `npm run test:compression`,
+`npm run type-check`, `npm run build-check`.
 
 ## Try as a local personal plugin on Windows
 
