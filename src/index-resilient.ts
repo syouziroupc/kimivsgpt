@@ -68,6 +68,20 @@ const resultSchema = z.object({
   verify: z.array(z.string().max(160)).max(2),
   next_step: z.string().max(180),
   confidence: z.number().min(0).max(1),
+  perspectives: z.array(z.object({
+    model: z.string(),
+    focus: z.string(),
+    status: z.enum(["ok", "unavailable"]),
+    verdict: z.enum(["proceed", "revise", "verify"]).optional(),
+    risk: z.number().int().min(0).max(3).optional(),
+    issues: z.array(z.object({
+      type: issueType,
+      target: z.string().max(120),
+      correction: z.string().max(180),
+    })).max(3).optional(),
+    verify: z.array(z.string().max(160)).max(2).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+  })).max(3).optional(),
 }).strict();
 
 type AuditResult = z.infer<typeof resultSchema>;
@@ -383,7 +397,7 @@ async function invokeModel(env: Env, model: string, serialized: string, level: "
   return parseAudit(await env.AI.run(model, input));
 }
 
-async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
+async function runReviewLegacy(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
   const serialized = JSON.stringify(packet);
   if (serialized.length > MAX_PACKET_CHARS) {
     throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
@@ -409,6 +423,148 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
     }
   }
   throw new Error(lastError);
+}
+
+
+type EnsembleRole = { model: string; focus: string; instruction: string; maxOutputTokens: number };
+const STANDARD_ENSEMBLE: EnsembleRole[] = [
+  {
+    model: "@cf/qwen/qwen3-30b-a3b-fp8",
+    focus: "Evidence and logic",
+    instruction: "Check logical consistency and whether the supplied evidence really supports the important claims.",
+    maxOutputTokens: 300,
+  },
+  {
+    model: "@cf/zai-org/glm-4.7-flash",
+    focus: "Alternatives and blind spots",
+    instruction: "Independently examine omitted alternatives, anchoring, false dichotomies and feasibility.",
+    maxOutputTokens: 300,
+  },
+];
+const DEEP_ENSEMBLE: EnsembleRole[] = [
+  STANDARD_ENSEMBLE[0],
+  {
+    model: "@cf/google/gemma-4-26b-a4b-it",
+    focus: "Constraints and counterexamples",
+    instruction: "Independently check explicit user constraints and find a concrete counterexample to a material claim if justified.",
+    maxOutputTokens: 320,
+  },
+  {
+    model: "@cf/openai/gpt-oss-20b",
+    focus: "Technical and security risks",
+    instruction: "Independently check technical feasibility, security, failure modes and unjustified certainty.",
+    maxOutputTokens: 320,
+  },
+];
+
+async function invokeEnsembleMember(
+  env: Env,
+  role: EnsembleRole,
+  serialized: string,
+): Promise<AuditResult> {
+  const prompt = `${AUDITOR_PROMPT}
+Independent focus: ${role.instruction}
+You have no access to other reviewers' opinions. Do not imitate a consensus.
+Return at most ONE important issue and ONE verification request. Empty arrays are valid.
+Keep the result under 230 generated tokens if possible. Always include all six required JSON keys.`;
+  const input: Record<string, unknown> = {
+    messages: [
+      { role: "system", content: prompt },
+      { role: "user", content: serialized },
+    ],
+    max_tokens: role.maxOutputTokens,
+    temperature: 0,
+    stream: false,
+  };
+  const started = Date.now();
+  const raw = await env.AI.run(role.model, input);
+  const root = asRecord(raw);
+  const responseRoot = asRecord(root?.response);
+  const usage = asRecord(root?.usage) ?? asRecord(responseRoot?.usage);
+  console.info("auditor_ensemble_model", JSON.stringify({
+    model: role.model,
+    duration_ms: Date.now() - started,
+    input_tokens: usage?.prompt_tokens ?? usage?.input_tokens ?? null,
+    output_tokens: usage?.completion_tokens ?? usage?.output_tokens ?? null,
+  }));
+  return parseAudit(raw);
+}
+
+async function runReviewEnsemble(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
+  const serialized = JSON.stringify(packet);
+  if (serialized.length > MAX_PACKET_CHARS) {
+    throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
+  }
+  const members = packet.review_level === "deep" ? DEEP_ENSEMBLE : STANDARD_ENSEMBLE;
+  // Independent, parallel, single-shot reviews. Never auto-escalate to expensive frontier models.
+  const outcomes = await Promise.allSettled(members.map((role) => invokeEnsembleMember(env, role, serialized)));
+  const successful: Array<{ role: EnsembleRole; audit: AuditResult }> = [];
+  const perspectives: NonNullable<AuditResult["perspectives"]> = [];
+  let failed = 0;
+  for (let i = 0; i < outcomes.length; i++) {
+    const role = members[i];
+    const outcome = outcomes[i];
+    if (outcome.status === "fulfilled") {
+      const audit = outcome.value;
+      successful.push({ role, audit });
+      perspectives.push({
+        model: role.model, focus: role.focus, status: "ok",
+        verdict: audit.verdict, risk: audit.risk, issues: audit.issues,
+        verify: audit.verify, confidence: audit.confidence,
+      });
+    } else {
+      failed++;
+      console.warn("auditor_ensemble_member_failed", JSON.stringify({
+        model: role.model, error: errorText(outcome.reason).slice(0, 180),
+      }));
+      perspectives.push({ model: role.model, focus: role.focus, status: "unavailable" });
+    }
+  }
+  if (successful.length === 0) throw new Error("auditor_ensemble_all_models_failed");
+
+  const ranked = [...successful].sort((a, b) => b.audit.risk - a.audit.risk);
+  const issues: AuditResult["issues"] = [];
+  const verifications: string[] = [];
+  const issueKeys = new Set<string>();
+  for (const { audit } of ranked) {
+    for (const issue of audit.issues) {
+      const key = `${issue.type}:${issue.target.trim().toLowerCase()}`;
+      if (issueKeys.has(key)) continue;
+      issueKeys.add(key);
+      if (issues.length < 3) issues.push(issue);
+    }
+    for (const item of audit.verify) {
+      if (verifications.length < 2 && !verifications.includes(item)) verifications.push(item);
+    }
+  }
+  if (failed > 0) {
+    if (issues.length < 3) issues.push({
+      type: "evidence_gap",
+      target: "Independent reviewer coverage",
+      correction: `${failed} of ${members.length} reviewers failed; surviving opinions must not be presented as unanimous.`,
+    });
+    if (verifications.length < 2) verifications.push("Recheck unavailable reviewers before relying on consensus.");
+  }
+  const hasRevision = successful.some(({ audit }) => audit.verdict === "revise");
+  const hasUncertainty = failed > 0 || successful.some(({ audit }) => audit.verdict === "verify");
+  const verdict: AuditResult["verdict"] = hasRevision ? "revise" : hasUncertainty ? "verify" : "proceed";
+  return resultSchema.parse({
+    verdict,
+    risk: Math.max(failed > 0 ? 2 : 0, ...successful.map(({ audit }) => audit.risk)),
+    issues,
+    verify: verifications,
+    next_step: ranked[0].audit.next_step,
+    confidence: Math.max(0, Math.min(...successful.map(({ audit }) => audit.confidence)) * (failed > 0 ? 0.65 : 1)),
+    perspectives,
+  });
+}
+
+async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
+  // Escape hatch for controlled comparisons or rollback without schema/OAuth changes.
+  if ((env as Env & { AUDITOR_MODE?: string }).AUDITOR_MODE === "legacy") {
+    return runReviewLegacy(env, packet);
+  }
+  return runReviewEnsemble(env, packet);
 }
 
 function guaranteedFallback(lastError: string): AuditResult {
