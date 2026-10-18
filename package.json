@@ -14,7 +14,8 @@
     "cf-typegen": "wrangler types",
     "test:concurrency": "node scripts/verify-concurrency-contract.mjs",
     "test:reliability": "node scripts/verify-reliability-contract.mjs",
-    "test:ensemble": "node scripts/verify-ensemble-contract.mjs"
+    "test:ensemble": "node scripts/verify-ensemble-contract.mjs",
+    "test:ensemble:behavior": "node scripts/test-ensemble-behavior.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
