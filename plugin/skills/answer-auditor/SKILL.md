@@ -103,7 +103,7 @@ Do not send secrets, credentials, unnecessary personal data, large file contents
 
 ## Multiple independent perspectives
 
-The Worker now returns the original summary fields plus optional `perspectives`.
+The Worker runs **exactly three independent critics concurrently** at either review level and returns the original summary fields plus optional `perspectives`.
 Treat each available review separately before using the merged `verdict`.
 Preserve material disagreements and explicitly distinguish unavailable
 reviewers from those returning `proceed`. Do not convert a missing review
