@@ -684,6 +684,22 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
 }
 
 function guaranteedFallback(lastError: string): AuditResult {
+  const overBudget = lastError.startsWith("auditor_compact_packet_over_budget:")
+    || lastError.startsWith("review_packet_too_large:");
+  if (overBudget) {
+    return resultSchema.parse({
+      verdict: "verify",
+      risk: 1,
+      issues: [{
+        type: "evidence_gap",
+        target: "Audit input exceeds the cost budget",
+        correction: "No models were called. Shorten the packet at its source without dropping material evidence.",
+      }],
+      verify: ["External audit was skipped before inference to avoid excessive token charges."],
+      next_step: "Submit a shorter, fact-preserving review packet.",
+      confidence: 0.1,
+    });
+  }
   return resultSchema.parse({
     verdict: "verify",
     risk: 2,
