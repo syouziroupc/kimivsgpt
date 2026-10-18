@@ -13,11 +13,11 @@ for (const statement of ast.statements) {
         selections.set(declaration.name.text, statement.getText(ast));
       }
     }
-  } else if (ts.isFunctionDeclaration(statement) && statement.name?.text === "runReviewEnsemble") {
+  } else if (ts.isFunctionDeclaration(statement) && ["runReviewEnsemble", "compactReviewPacket"].includes(statement.name?.text)) {
     selections.set("runReviewEnsemble", statement.getText(ast));
   }
 }
-for (const key of ["STANDARD_ENSEMBLE", "DEEP_ENSEMBLE", "runReviewEnsemble"]) {
+for (const key of ["STANDARD_ENSEMBLE", "DEEP_ENSEMBLE", "compactReviewPacket", "runReviewEnsemble"]) {
   assert.ok(selections.has(key), `Missing source declaration: ${key}`);
 }
 const compiled = ts.transpileModule(
