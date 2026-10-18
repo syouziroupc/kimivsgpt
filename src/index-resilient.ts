@@ -440,6 +440,12 @@ const STANDARD_ENSEMBLE: EnsembleRole[] = [
     instruction: "Independently examine omitted alternatives, anchoring, false dichotomies and feasibility.",
     maxOutputTokens: 300,
   },
+  {
+    model: "@cf/ibm-granite/granite-4.0-h-micro",
+    focus: "Explicit requirements and scope",
+    instruction: "Independently check the user's explicit requirements, missing steps and scope violations. Criticize only concrete errors supported by this packet.",
+    maxOutputTokens: 280,
+  },
 ];
 const DEEP_ENSEMBLE: EnsembleRole[] = [
   STANDARD_ENSEMBLE[0],
@@ -496,7 +502,11 @@ async function runReviewEnsemble(env: Env, packet: z.infer<typeof packetSchema>)
     throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
   }
   const members = packet.review_level === "deep" ? DEEP_ENSEMBLE : STANDARD_ENSEMBLE;
-  // Independent, parallel, single-shot reviews. Never auto-escalate to expensive frontier models.
+  // Exactly three independent simultaneous critics for either review level.
+  // Never pass one reviewer's opinion to another or auto-escalate to an expensive model.
+  if (members.length !== 3 || new Set(members.map((m) => m.model)).size !== 3) {
+    throw new Error("auditor_invalid_three_critic_configuration");
+  }
   const outcomes = await Promise.allSettled(members.map((role) => invokeEnsembleMember(env, role, serialized)));
   const successful: Array<{ role: EnsembleRole; audit: AuditResult }> = [];
   const perspectives: NonNullable<AuditResult["perspectives"]> = [];
@@ -574,13 +584,13 @@ function guaranteedFallback(lastError: string): AuditResult {
     issues: [{
       type: "evidence_gap",
       target: "Independent external audit result",
-      correction: "No validated model audit was obtained after bounded retries and model failover; verify material claims independently.",
+      correction: "All three independent critics failed to produce a valid review; verify material claims independently.",
     }],
     verify: [
-      "No schema-valid model audit was obtained after automatic retries and failover.",
+      "No schema-valid opinion was obtained from any of the three independent critics.",
       `Last upstream error: ${lastError.slice(0, 120)}`,
     ],
-    next_step: "Proceed only with independently verified evidence; the auditor will automatically retry models on the next call.",
+    next_step: "Proceed only with independently verified evidence; the next review request will try the three critics independently.",
     confidence: 0.1,
   });
 }
