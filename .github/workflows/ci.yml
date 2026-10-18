@@ -43,4 +43,5 @@ jobs:
       - run: npm run test:reliability
       - run: npm run test:ensemble
       - run: npm run test:ensemble:behavior
+      - run: npm run test:compression
       - run: npm run build-check
