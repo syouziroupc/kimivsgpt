@@ -97,6 +97,19 @@ for (const level of ["standard", "deep"]) {
 }
 mockInvoke = null;
 
+// Explicit preflight cost guard: preserve the input text but spend zero model tokens.
+const largePacket = {
+  ...packet,
+  key_claims: Array(5).fill("K".repeat(240)),
+  evidence: Array(5).fill("E".repeat(320)),
+  constraints: Array(5).fill("C".repeat(220)),
+};
+let chargedCalls = 0;
+mockInvoke = async () => { chargedCalls++; return report("proceed", 0); };
+await assert.rejects(runReviewEnsemble({}, largePacket), /auditor_compact_packet_over_budget/);
+assert.equal(chargedCalls, 0, "Rejected packets must not launch any AI call");
+mockInvoke = null;
+
 results.set(qwen, report("proceed", 0));
 results.set(gemma, report("verify", 2, "unsupported"));
 results.set(gptoss, report("revise", 2, "scope_drift"));
