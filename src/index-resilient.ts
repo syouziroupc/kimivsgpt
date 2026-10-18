@@ -597,6 +597,16 @@ async function runReviewEnsemble(env: Env, packet: z.infer<typeof packetSchema>)
     throw new Error(`review_packet_too_large:${originalLength}>${MAX_PACKET_CHARS}`);
   }
   const serialized = compactReviewPacket(packet);
+  // Cost guard applies BEFORE any model starts. Fail transparently instead
+  // of silently dropping evidence or spending unbounded inference tokens.
+  if (serialized.length > 2400) {
+    throw new Error(`auditor_compact_packet_over_budget:${serialized.length}>2400`);
+  }
+  console.info("auditor_prompt_compression", JSON.stringify({
+    packet_chars: originalLength,
+    compact_packet_chars: serialized.length,
+    critic_count: 3,
+  }));
   const members = packet.review_level === "deep" ? DEEP_ENSEMBLE : STANDARD_ENSEMBLE;
   // Exactly three independent simultaneous critics for either review level.
   // Never pass one reviewer's opinion to another or auto-escalate to an expensive model.
