@@ -101,6 +101,21 @@ Limited web verification is a bounded evidence check, not permission for autonom
 
 Do not send secrets, credentials, unnecessary personal data, large file contents, full codebases, long conversation history, or hidden chain-of-thought.
 
+## Input budget and field preservation
+
+Prefer a dense packet: user request and proposed answer in one sentence each;
+only decisive claims, dated source evidence, relevant constraints, and meaningful
+uncertainties. Target around 1,200–1,800 serialized characters when sufficient.
+Do not invent summaries of facts or omit an indispensable qualification only
+to fit a size goal.
+
+The Worker converts verbose transport keys to short internal keys and imposes
+a 2,400-character compact packet cap before inference. If the packet is over
+the limit, the result explicitly reports that **zero external reviewers ran**.
+Do not present it as independent criticism. Do not automatically retry with
+more models or send a fourth compression request. Standard and deep each run
+three models exactly once, with 200-token output ceilings.
+
 ## Multiple independent perspectives
 
 The Worker runs **exactly three independent critics concurrently** at either review level and returns the original summary fields plus optional `perspectives`.
