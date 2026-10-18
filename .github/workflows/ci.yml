@@ -29,3 +29,17 @@ jobs:
         run: |
           $text = Get-Content -Raw -Path ./install-local.ps1
           [void][scriptblock]::Create($text)
+
+  ensemble-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run test:concurrency
+      - run: npm run test:reliability
+      - run: npm run test:ensemble
+      - run: npm run build-check
