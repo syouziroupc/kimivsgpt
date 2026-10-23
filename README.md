@@ -29,53 +29,19 @@ Skip trivial chat, deterministic calculations, straightforward rewriting/transla
 
 The critics never write the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
 
-## Independent multi-model reviews and bounded inference cost
+## Independent high-capability multi-model review (draft PR only)
 
-The active entrypoint remains `src/index-reliable.ts`; three independent
-reviewers begin in parallel for both standard and deep modes. Reviewers do not
-see or debate one another's output. Responses preserve the existing MCP
-`review_strategy` six-field result and add optional per-model `perspectives`.
+This PR changes the proposed low-cost small-model roster into a **diverse high-capability ensemble**. It does not modify the deployed `main` Worker.
 
-**Standard:** Qwen3-30B-A3B-FP8 (evidence), GLM-4.7 Flash (alternatives),
-IBM Granite 4.0 H Micro (explicit constraints).
-**Deep:** Qwen3-30B-A3B-FP8, Gemma 4 26B A4B IT, GPT-OSS 20B.
+- Standard (three simultaneous independent critics): Kimi K2.6 (adversarial challenge), GLM-5.3 (alternatives), GPT-OSS 120B (technical/logical issues).
+- Deep (five simultaneous independent critics): the three Standard models plus DeepSeek V4 Pro 0813 (evidence/counterargument) and Nemotron 3 120B-A12B (constraints/edge cases).
+- The models receive the same compact original evidence and their peers' opinions are never forwarded. Individual `perspectives` are retained even if a reviewer fails. They are **not** votes and disagreement is not discarded.
+- Existing one-call MCP API, authentication, legacy rollback mode, six-field response, input guard (2,400 compact characters), and per-model output cap (200 tokens) remain unchanged.
+- Each critic reports at most one material issue, which is retained in `perspectives`. The legacy top-level response still has up to three issues; consumers needing all five must read `perspectives`.
+- Token usage, latency and estimated variable inference cost are logged when available. Actual bills, latency and model critique accuracy require live tests. Heavy models may need tuning of timeouts and output protocol prior to release.
+- **Do not merge or deploy until** live endpoint/schema tests, budget checks, no-loss perspective tests, and the existing vulnerable-dependency audit blocker pass.
 
-The cost-saving pipeline uses **no fourth model or secondary compression API**:
-
-1. Accept the same public review packet; validate its original 5,000-character
-   upper bound and keep every populated field unchanged.
-2. Convert field names to short local aliases (`u,d,k,a,e,c,x`) and omit
-   empty optional arrays. This operation preserves all supplied content.
-3. Reject a compact packet exceeding **2,400 characters before launching any
-   inference**. Do not silently cut claims, constraints, or evidence. Return
-   an explicit no-inference cost-guard verdict.
-4. Run three independent critics simultaneously. A brief system instruction
-   requests one material finding using `{v,t,f,q}` and a **200-token maximum
-   generated output per critic**.
-5. Convert small-model responses locally into the original audit shape;
-   missing/malformed output becomes an unavailable perspective, never a
-   manufactured agreement. Do not automatically retry or escalate to Kimi.
-6. Log model ID, reported input/output token usage, elapsed time and
-   an estimated USD variable inference cost when usage data is provided.
-   Never log user prompts or private evidence. Cloudflare daily free
-   Neuron allowances and other service fees are outside this estimate.
-
-The explicit `AUDITOR_MODE=legacy` switch remains for comparison/rollback;
-it is not part of the normal low-cost review path. OAuth, `/mcp`, Worker
-request deadlines, the original six fields, and the one-host-call workflow
-are unchanged.
-
-**Illustrative price comparison (NOT a measured bill).** If a review formerly
-used 1,500 input/150 output tokens per critic and compression achieves 1,300/90,
-Cloudflare model rates give standard $0.0003198 → $0.00024328 (23.9% lower),
-and deep $0.00066675 → $0.00054045 (18.9% lower). Actual tokenization,
-JSON completion rate, free allowances, and model quality still require
-live observation. Neither a character cap nor `max_tokens` alone guarantees
-a monetary amount.
-
-Official unit prices: https://developers.cloudflare.com/workers-ai/platform/pricing/
-Tests: `npm run test:ensemble:behavior`, `npm run test:compression`,
-`npm run type-check`, `npm run build-check`.
+Official model IDs and current prices: https://developers.cloudflare.com/workers-ai/platform/pricing/
 
 ## Try as a local personal plugin on Windows
 
