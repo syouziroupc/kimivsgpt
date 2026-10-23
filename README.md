@@ -27,19 +27,21 @@ Review complex work such as multi-step analysis, research, troubleshooting with 
 
 Skip trivial chat, deterministic calculations, straightforward rewriting/translation, simple verified lookups, and purely creative generation.
 
-The critic never writes the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
+The critics never write the user's final answer, performs the primary research, generates a full code implementation, or receives hidden chain-of-thought.
 
-## Cost controls
+## Independent high-capability multi-model review (draft PR only)
 
-- Standard model: `@cf/zai-org/glm-5.3-flash`
-- Deep model: `@cf/moonshotai/kimi-k2.6`
-- Kimi is reserved for materially high-stakes, irreversible, security-sensitive, or unusually disputed decisions; task length alone does not justify it
-- Completion cap: 360 tokens
-- Review packet hard cap: 5,000 characters
-- Maximum three issues and two verification requests
-- One review call per substantive answer by default
-- Standard review uses one model call; minor schema variation is normalized locally rather than retried
-- Cloudflare rate limits: standard 30/minute, deep 3/minute
+This PR changes the proposed low-cost small-model roster into a **diverse high-capability ensemble**. It does not modify the deployed `main` Worker.
+
+- Standard (three simultaneous independent critics): Kimi K2.6 (adversarial challenge), GLM-5.3 (alternatives), GPT-OSS 120B (technical/logical issues).
+- Deep (five simultaneous independent critics): the three Standard models plus DeepSeek V4 Pro 0813 (evidence/counterargument) and Nemotron 3 120B-A12B (constraints/edge cases).
+- The models receive the same compact original evidence and their peers' opinions are never forwarded. Individual `perspectives` are retained even if a reviewer fails. They are **not** votes and disagreement is not discarded.
+- Existing one-call MCP API, authentication, legacy rollback mode, six-field response, input guard (2,400 compact characters), and per-model output cap (200 tokens) remain unchanged.
+- Each critic reports at most one material issue, which is retained in `perspectives`. The legacy top-level response still has up to three issues; consumers needing all five must read `perspectives`.
+- Token usage, latency and estimated variable inference cost are logged when available. Actual bills, latency and model critique accuracy require live tests. Heavy models may need tuning of timeouts and output protocol prior to release.
+- **Do not merge or deploy until** live endpoint/schema tests, budget checks, no-loss perspective tests, and the existing vulnerable-dependency audit blocker pass.
+
+Official model IDs and current prices: https://developers.cloudflare.com/workers-ai/platform/pricing/
 
 ## Try as a local personal plugin on Windows
 

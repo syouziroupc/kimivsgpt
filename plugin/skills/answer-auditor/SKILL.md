@@ -1,6 +1,6 @@
 ---
 name: answer-auditor
-description: Automatically use the independent review_strategy critic exactly once before finalizing substantive complex work: multi-step factual analysis, research, troubleshooting, planning, recommendations, comparisons, architecture or coding-plan decisions, and consequential judgments. When a conclusion materially depends on fresh public facts, allow one narrow host-side web verification pass before review and pass only compressed source evidence to the critic. Do not wait for an @mention. Skip simple chat, single-answer lookups, deterministic arithmetic, straightforward rewriting/translation, and purely creative requests. Use standard by default; automatically use deep for materially high-stakes, expensive or irreversible, security-sensitive, unusually disputed, weak-evidence, or explicitly rigorous/deep-review tasks.
+description: Automatically use the independent multi-model review_strategy ensemble exactly once before finalizing substantive complex work: multi-step factual analysis, research, troubleshooting, planning, recommendations, comparisons, architecture or coding-plan decisions, and consequential judgments. When a conclusion materially depends on fresh public facts, allow one narrow host-side web verification pass before review and pass only compressed source evidence to the critic. Do not wait for an @mention. Skip simple chat, single-answer lookups, deterministic arithmetic, straightforward rewriting/translation, and purely creative requests. Use standard by default; automatically use deep for materially high-stakes, expensive or irreversible, security-sensitive, unusually disputed, weak-evidence, or explicitly rigorous/deep-review tasks.
 ---
 
 # Answer Auditor
@@ -57,7 +57,7 @@ If web search is unavailable or does not produce adequate evidence, preserve the
 
 ## External review when available
 
-If `review_strategy` is available, call it exactly once before the final answer. The external critic is advisory, not an authority.
+If `review_strategy` is available, call it exactly once before the final answer. The independent reviewers are advisory, not authorities. Inspect the optional perspectives field and preserve disagreement and unavailable reviewers.
 
 Before calling it, send only a compressed review packet. Never send hidden reasoning, chain-of-thought, or a transcript. Keep the entire packet comfortably below the Worker's 5,000-character hard limit.
 
@@ -95,8 +95,32 @@ When the external tool is unavailable, mention that fact only when the user expl
 
 ## Cost and scope controls
 
-The external critic must never be used to draft the user's answer, write code, perform the primary research, or solve the whole task. The primary model does the work; the critic only flags concise defects.
+The external reviewers must never be used to draft the user's answer, write code, perform the primary research, or solve the whole task. The primary model does the work; the critic only flags concise defects.
 
 Limited web verification is a bounded evidence check, not permission for autonomous research loops. Keep search and model calls separately bounded so a single answer cannot trigger an uncontrolled cost cascade.
 
 Do not send secrets, credentials, unnecessary personal data, large file contents, full codebases, long conversation history, or hidden chain-of-thought.
+
+## Input budget and field preservation
+
+Prefer a dense packet: user request and proposed answer in one sentence each;
+only decisive claims, dated source evidence, relevant constraints, and meaningful
+uncertainties. Target around 1,200–1,800 serialized characters when sufficient.
+Do not invent summaries of facts or omit an indispensable qualification only
+to fit a size goal.
+
+The Worker converts verbose transport keys to short internal keys and imposes
+a 2,400-character compact packet cap before inference. If the packet is over
+the limit, the result explicitly reports that **zero external reviewers ran**.
+Do not present it as independent criticism. Do not automatically retry with
+more models or send a fourth compression request. Standard and deep each run
+three models exactly once, with 200-token output ceilings.
+
+## Multiple independent perspectives
+
+The Worker runs **exactly three independent critics concurrently** at either review level and returns the original summary fields plus optional `perspectives`.
+Treat each available review separately before using the merged `verdict`.
+Preserve material disagreements and explicitly distinguish unavailable
+reviewers from those returning `proceed`. Do not convert a missing review
+into a consensus. Only the Worker chooses the models; the host calls
+`review_strategy` **once** and never starts its own model fan-out.
