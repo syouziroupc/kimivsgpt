@@ -99,7 +99,7 @@ assert.equal(calls, 1);
 assert.equal(member.issues[0].correction, "数字を訂正");
 assert.equal(sent.input.messages[1].content, compact);
 assert.ok(sent.input.messages[0].content.length < 1000);
-assert.equal(sent.input.max_tokens, 200);
+assert.equal(sent.input.max_completion_tokens, 200);
 const costLog = reports.find((x) => x[0] === "auditor_ensemble_model");
 assert.ok(costLog);
 const data = JSON.parse(costLog[1]);
