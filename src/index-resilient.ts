@@ -438,52 +438,52 @@ type EnsembleRole = {
 };
 const STANDARD_ENSEMBLE: EnsembleRole[] = [
   {
-    model: "@cf/qwen/qwen3-30b-a3b-fp8",
-    focus: "Evidence and logic",
-    instruction: "Examine unsupported claims and contradictions.",
+    model: "@cf/moonshotai/kimi-k2.6",
+    focus: "Independent adversarial analysis",
+    instruction: "Challenge the central conclusion; identify a decisive counterexample, or proceed.",
     issueType: "unsupported",
     maxOutputTokens: 200,
-    inputUSDPerMillion: 0.051,
-    outputUSDPerMillion: 0.335,
+    inputUSDPerMillion: 0.95,
+    outputUSDPerMillion: 4.0,
   },
   {
-    model: "@cf/zai-org/glm-4.7-flash",
-    focus: "Alternatives and blind spots",
-    instruction: "Examine missing options and unjustified framing.",
+    model: "@cf/zai-org/glm-5.3",
+    focus: "Alternatives and assumptions",
+    instruction: "Check hidden assumptions, neglected alternatives and framing.",
     issueType: "missing_alternative",
     maxOutputTokens: 200,
-    inputUSDPerMillion: 0.0605,
-    outputUSDPerMillion: 0.4,
+    inputUSDPerMillion: 1.4,
+    outputUSDPerMillion: 4.4,
   },
   {
-    model: "@cf/ibm-granite/granite-4.0-h-micro",
-    focus: "Explicit requirements and scope",
-    instruction: "Examine violated requirements and scope drift.",
+    model: "@cf/openai/gpt-oss-120b",
+    focus: "Technical feasibility and logical consistency",
+    instruction: "Identify implementation defects, contradictory reasoning and overlooked failure modes.",
     issueType: "constraint_violation",
     maxOutputTokens: 200,
-    inputUSDPerMillion: 0.017,
-    outputUSDPerMillion: 0.112,
+    inputUSDPerMillion: 0.35,
+    outputUSDPerMillion: 0.75,
   },
 ];
 const DEEP_ENSEMBLE: EnsembleRole[] = [
-  STANDARD_ENSEMBLE[0],
+  ...STANDARD_ENSEMBLE,
   {
-    model: "@cf/google/gemma-4-26b-a4b-it",
-    focus: "Constraints and counterexamples",
-    instruction: "Examine counterexamples and broken requirements.",
-    issueType: "constraint_violation",
+    model: "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    focus: "Counterarguments and evidence",
+    instruction: "Independently test evidence validity and strongest competing explanations.",
+    issueType: "evidence_gap",
     maxOutputTokens: 200,
-    inputUSDPerMillion: 0.1,
-    outputUSDPerMillion: 0.3,
+    inputUSDPerMillion: 1.32,
+    outputUSDPerMillion: 3.96,
   },
   {
-    model: "@cf/openai/gpt-oss-20b",
-    focus: "Technical and security risks",
-    instruction: "Examine implementation and security mistakes.",
-    issueType: "unsupported",
+    model: "@cf/nvidia/nemotron-3-120b-a12b",
+    focus: "Requirements, user goals and edge cases",
+    instruction: "Check user constraints, edge cases and practical applicability.",
+    issueType: "constraint_violation",
     maxOutputTokens: 200,
-    inputUSDPerMillion: 0.2,
-    outputUSDPerMillion: 0.3,
+    inputUSDPerMillion: 0.5,
+    outputUSDPerMillion: 1.5,
   },
 ];
 
@@ -564,10 +564,14 @@ async function invokeEnsembleMember(
       { role: "system", content: `${role.model.includes("/qwen/") ? "/no_think\n" : ""}${COMPACT_AUDITOR_PROMPT} ${role.instruction}` },
       { role: "user", content: serialized },
     ],
-    max_tokens: role.maxOutputTokens,
+    max_completion_tokens: role.maxOutputTokens,
     temperature: 0,
     stream: false,
   };
+  if (role.model.includes("/kimi-")) {
+    input.reasoning_effort = "none";
+    input.chat_template_kwargs = { thinking: false };
+  }
   const started = Date.now();
   const raw = await env.AI.run(role.model, input);
   const root = asRecord(raw);
@@ -605,13 +609,14 @@ async function runReviewEnsemble(env: Env, packet: z.infer<typeof packetSchema>)
   console.info("auditor_prompt_compression", JSON.stringify({
     packet_chars: originalLength,
     compact_packet_chars: serialized.length,
-    critic_count: 3,
+    critic_count: packet.review_level === "deep" ? 5 : 3,
   }));
   const members = packet.review_level === "deep" ? DEEP_ENSEMBLE : STANDARD_ENSEMBLE;
-  // Exactly three independent simultaneous critics for either review level.
+  // Independent critics launch simultaneously; standard has three, deep has five.
   // Never pass one reviewer's opinion to another or auto-escalate to an expensive model.
-  if (members.length !== 3 || new Set(members.map((m) => m.model)).size !== 3) {
-    throw new Error("auditor_invalid_three_critic_configuration");
+  const expectedMembers = packet.review_level === "deep" ? 5 : 3;
+  if (members.length !== expectedMembers || new Set(members.map((m) => m.model)).size !== expectedMembers) {
+    throw new Error("auditor_invalid_critic_configuration");
   }
   const outcomes = await Promise.allSettled(members.map((role) => invokeEnsembleMember(env, role, serialized)));
   const successful: Array<{ role: EnsembleRole; audit: AuditResult }> = [];
