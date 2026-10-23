@@ -43,25 +43,25 @@ const context = {
 vm.runInNewContext(compiled, context);
 const { runReviewEnsemble } = context.module.exports;
 
-const qwen = "@cf/qwen/qwen3-30b-a3b-fp8";
-const glm = "@cf/zai-org/glm-4.7-flash";
-const gemma = "@cf/google/gemma-4-26b-a4b-it";
-const gptoss = "@cf/openai/gpt-oss-20b";
-const granite = "@cf/ibm-granite/granite-4.0-h-micro";
+const kimi = "@cf/moonshotai/kimi-k2.6";
+const glm = "@cf/zai-org/glm-5.3";
+const deepseek = "@cf/deepseek-ai/deepseek-v4-pro-0813";
+const gptoss = "@cf/openai/gpt-oss-120b";
+const nemotron = "@cf/nvidia/nemotron-3-120b-a12b";
 const report = (verdict, risk, type = "evidence_gap") => ({
   verdict, risk, issues: verdict === "proceed" ? [] : [{ type, target: type, correction: "Action" }],
   verify: verdict === "verify" ? ["Verify source"] : [],
   next_step: "Investigate", confidence: 0.8,
 });
 const packet = { user_request: "Test", proposed_direction: "Test", review_level: "standard" };
-results.set(qwen, report("proceed", 0));
+results.set(kimi, report("proceed", 0));
 results.set(glm, report("revise", 3, "missing_alternative"));
-results.set(granite, report("proceed", 0));
+results.set(gptoss, report("proceed", 0));
 let res = await runReviewEnsemble({}, packet);
 assert.equal(res.verdict, "revise");
 assert.equal(res.risk, 3);
 assert.equal(res.perspectives.length, 3);
-assert.ok(res.perspectives.some((r) => r.model === granite));
+assert.ok(res.perspectives.some((r) => r.model === gptoss));
 assert.ok(res.perspectives.every((r) => r.status === "ok"));
 assert.equal(res.issues.length, 1);
 
@@ -71,8 +71,8 @@ assert.equal(res.verdict, "verify");
 assert.equal(res.perspectives.filter((r) => r.status === "unavailable").length, 1);
 assert.ok(res.issues.some((issue) => issue.type === "evidence_gap"));
 
-results.set(qwen, "fail");
-results.set(granite, "fail");
+results.set(kimi, "fail");
+results.set(gptoss, "fail");
 await assert.rejects(runReviewEnsemble({}, packet), /auditor_ensemble_all_models_failed/);
 
 // Three models must be STARTED before any result becomes available.
@@ -87,12 +87,13 @@ for (const level of ["standard", "deep"]) {
     return report("proceed", 0);
   };
   const pending = runReviewEnsemble({}, { ...packet, review_level: level });
-  assert.equal(starts.length, 3, `Expected 3 simultaneous critics in ${level}`);
-  assert.equal(new Set(starts).size, 3, "Critics must be different models");
+  const expected = level === "deep" ? 5 : 3;
+  assert.equal(starts.length, expected, `Expected ${expected} simultaneous critics in ${level}`);
+  assert.equal(new Set(starts).size, expected, "Critics must be different models");
   release();
   const audit = await pending;
   assert.equal(audit.verdict, "proceed");
-  assert.equal(audit.perspectives.length, 3);
+  assert.equal(audit.perspectives.length, expected);
   assert.ok(audit.perspectives.every((r) => r.status === "ok"));
 }
 mockInvoke = null;
@@ -110,14 +111,16 @@ await assert.rejects(runReviewEnsemble({}, largePacket), /auditor_compact_packet
 assert.equal(chargedCalls, 0, "Rejected packets must not launch any AI call");
 mockInvoke = null;
 
-results.set(qwen, report("proceed", 0));
-results.set(gemma, report("verify", 2, "unsupported"));
-results.set(gptoss, report("revise", 2, "scope_drift"));
+results.set(kimi, report("proceed", 0));
+results.set(glm, report("proceed", 0));
+results.set(gptoss, report("proceed", 0));
+results.set(deepseek, report("verify", 2, "unsupported"));
+results.set(nemotron, report("revise", 2, "scope_drift"));
 res = await runReviewEnsemble({}, { ...packet, review_level: "deep" });
 assert.equal(res.verdict, "revise");
-assert.equal(res.perspectives.length, 3);
-assert.ok(res.perspectives.some((r) => r.model === gemma));
-assert.ok(res.perspectives.some((r) => r.model === gptoss));
+assert.equal(res.perspectives.length, 5);
+assert.ok(res.perspectives.some((r) => r.model === deepseek));
+assert.ok(res.perspectives.some((r) => r.model === nemotron));
 assert.ok(res.issues.some((r) => r.type === "unsupported"));
 assert.ok(res.issues.some((r) => r.type === "scope_drift"));
 console.log("ensemble behavior checks passed");
