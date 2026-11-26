@@ -1,4 +1,4 @@
-import concurrent.futures, json, os, time, urllib.request
+import concurrent.futures, json, os, time, subprocess
 BASE="https://kimivsgpt.syouziroupc.workers.dev/mcp"
 TOKEN=os.environ["SMOKE_OIDC_TOKEN"]
 def run(i,level,complex_case):
@@ -10,9 +10,8 @@ def run(i,level,complex_case):
         for key,count,cap in [("key_claims",5,240),("assumptions",4,220),("evidence",5,320),("constraints",5,220),("uncertainties",4,220)]:
             packet[key]=[(f"{key} {j}: データ整合性と監査証跡の検証が必要。"*15)[:cap] for j in range(count)]
     payload={"jsonrpc":"2.0","id":i,"method":"tools/call","params":{"name":"review_strategy","arguments":packet}}
-    req=urllib.request.Request(BASE,data=json.dumps(payload,ensure_ascii=False).encode(),headers={"x-github-oidc":TOKEN,"Content-Type":"application/json","Accept":"application/json, text/event-stream","MCP-Protocol-Version":"2025-03-26"})
     start=time.monotonic()
-    with urllib.request.urlopen(req,timeout=32) as resp: raw=resp.read().decode()
+    raw=subprocess.run(["curl","--fail-with-body","--silent","--show-error","--max-time","32","-H","x-github-oidc: "+TOKEN,"-H","Content-Type: application/json","-H","Accept: application/json, text/event-stream","-H","MCP-Protocol-Version: 2025-03-26","--data-binary","@-",BASE],input=json.dumps(payload,ensure_ascii=False).encode(),stdout=subprocess.PIPE,check=True).stdout.decode()
     try: rpc=json.loads(raw)
     except ValueError:
         rpc=next(obj for line in raw.splitlines() if line.startswith("data:") for obj in [json.loads(line[5:])] if obj.get("id")==i)
