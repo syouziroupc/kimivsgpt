@@ -294,7 +294,7 @@ async function releaseDailyBudget(env: Env, level: "standard" | "deep"): Promise
 }
 
 async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
-  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, "standard")));
+  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, "standard", AUDIT_JSON_SCHEMA)));
 }
 
 async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {

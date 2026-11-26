@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in {1..36}; do
-            if curl -fsS --max-time 10 https://kimivsgpt.syouziroupc.workers.dev/health | grep -q '"version":"0.9.0-reliable"'; then exit 0; fi
+            if curl -fsS --max-time 10 https://kimivsgpt.syouziroupc.workers.dev/health | grep -q '"version":"0.10.0-panel"'; then exit 0; fi
             sleep 5
           done
           exit 1
@@ -45,7 +45,8 @@ jobs:
             -H 'Accept: application/json, text/event-stream' \
             -H 'MCP-Protocol-Version: 2025-03-26' \
             --data "$payload" "$base/mcp" | tee /tmp/standard.txt
-          ! grep -q 'No schema-valid model audit' /tmp/standard.txt
+          grep -q 'model_reviews' /tmp/standard.txt
+          ! grep -Eq '"status":"failed"|\\"status\\":\\"failed\\"' /tmp/standard.txt
           ! grep -q 'rate_limit_exceeded' /tmp/standard.txt
           ! grep -q 'auditor_invalid_json' /tmp/standard.txt
           grep -Eq '"verdict"|\\"verdict\\"' /tmp/standard.txt
@@ -63,7 +64,8 @@ jobs:
               -H 'Accept: application/json, text/event-stream' \
               -H 'MCP-Protocol-Version: 2025-03-26' \
               --data "$payload" "$base/mcp" | tee "$out"
-            ! grep -q 'No schema-valid model audit' "$out"
+            grep -q 'model_reviews' "$out"
+            ! grep -Eq '"status":"failed"|\\"status\\":\\"failed\\"' "$out"
             ! grep -q 'rate_limit_exceeded' "$out"
             ! grep -q 'daily_limit_exceeded' "$out"
             ! grep -q 'auditor_invalid_json' "$out"

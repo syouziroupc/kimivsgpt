@@ -31,13 +31,10 @@ The critic never writes the user's final answer, performs the primary research, 
 
 ## Cost controls
 
-- Standard model: `@cf/qwen/qwen3.8-27b`
-- Deep model: `@cf/deepseek-ai/deepseek-v4.1-flash-1017`
-- Alternatives: `@cf/zai-org/glm-5.3`, `@cf/google/gemma-4-26b-a4b-it`; standard and deep candidates also cross-failover.
-- Retired model overrides are ignored. Each candidate is attempted once within the shared 24.5-second inference budget; invalid JSON or schema failures trigger failover.
-- Completion cap: 900 standard / 1200 deep tokens. Review packet hard cap: 5,000 characters.
-- Maximum three issues and two verification requests; no application review quota. Authentication throttling remains enabled.
-- If all models fail, return explicit verify/evidence_gap with low confidence; never interpret missing or malformed output as a passed audit.
+- Four parallel independent reviews: DeepSeek V4.1 Flash (frontier); Gemma 4 26B, Mistral Small 3.1 24B, Llama 4 Scout (economy).
+- Each result is strictly schema-validated and returned in model_reviews. Missing or conflicting votes prevent proceed. One material revise vote is retained; max risk is preserved. Confidence is an uncalibrated bounded agreement indicator.
+- Shared 24.5s inference budget; frontier up to 22s, economy up to 12s; no retries per model.
+- Four upstream inference calls per review; cost depends on actual tokens.
 
 ## Try as a local personal plugin on Windows
 

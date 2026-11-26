@@ -2,9 +2,10 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 
 export { AuthState };
 
-import { candidateModels } from "./model-policy";
-const VERSION = "0.9.0-reliable";
-const MODEL_CALL_TIMEOUT_MS = 8000;
+import { candidateModels, DEEP_MODEL, PANEL } from "./model-policy";
+const VERSION = "0.10.0-panel";
+const MODEL_CALL_TIMEOUT_MS = 12000;
+const FRONTIER_TIMEOUT_MS = 22000;
 const INFERENCE_BUDGET_MS = 24500;
 const MCP_REQUEST_DEADLINE_MS = 28000;
 
@@ -63,7 +64,7 @@ function buildReliableEnv(env: Env, startedAt: number): Env {
         throw new Error(`auditor_inference_budget_exhausted:${elapsed}ms`);
       }
 
-      const timeoutMs = Math.max(500, Math.min(MODEL_CALL_TIMEOUT_MS, remaining - 250));
+      const timeoutMs = Math.max(500, Math.min(model === DEEP_MODEL ? FRONTIER_TIMEOUT_MS : MODEL_CALL_TIMEOUT_MS, remaining - 250));
       try {
         return await withTimeout(
           env.AI.run(model, input),
@@ -126,6 +127,8 @@ export default {
         version: VERSION,
         standard_models: candidateModels(env, "standard"),
         deep_models: candidateModels(env, "deep"),
+        panel_models: PANEL,
+        frontier_timeout_ms: FRONTIER_TIMEOUT_MS,
         application_quota: "none",
         review_rate_limit: "none",
         auth_rate_limit: "enabled",
@@ -134,11 +137,11 @@ export default {
           inference_budget_ms: INFERENCE_BUDGET_MS,
           mcp_request_deadline_ms: MCP_REQUEST_DEADLINE_MS,
           skip_same_model_retry_after_timeout: true,
-          upstream_failover: true,
+          parallel_panel: true,
           schema_fallback: true,
           rpc_error_fallback: true,
         },
-        response_guarantee: "bounded MCP response; schema-valid audit fallback after model failures",
+        response_guarantee: "bounded MCP response; four independent reviews with explicit partial-panel status",
       });
     }
 

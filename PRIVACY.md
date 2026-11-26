@@ -14,7 +14,7 @@ The review packet is processed only to generate a short critique identifying mat
 
 ## AI processing and infrastructure
 
-The MCP service is hosted on Cloudflare Workers and uses Cloudflare Workers AI models. Standard reviews use Qwen3.8 27B by default; DeepSeek V4.1 Flash is preferred for unusually high-stakes or disputed cases. GLM-5.3 and Gemma 4 are alternate models hosted on Cloudflare.
+The MCP service is hosted on Cloudflare Workers and uses Cloudflare Workers AI models. Each review packet is processed independently by four Cloudflare Workers AI models from DeepSeek, Google, Mistral AI and Meta; partial failures are reported.
 
 The application does not intentionally persist review packets in an application database. Cloudflare infrastructure and observability features may process operational logs or telemetry according to the applicable Cloudflare service configuration and policies.
 

@@ -25,9 +25,10 @@ interface Env {
   OPENAI_APPS_CHALLENGE?: string;
 }
 
-import { candidateModels, modelInput } from "./model-policy";
+import { candidateModels, modelInput, PANEL } from "./model-policy";
+import { aggregatePanel } from "./panel";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.9.0-resilient";
+const VERSION = "0.10.0-panel";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -69,6 +70,13 @@ const resultSchema = z.object({
 }).strict();
 
 type AuditResult = z.infer<typeof resultSchema>;
+const panelResultSchema = resultSchema.extend({
+  model_reviews: z.array(z.discriminatedUnion("status", [
+    z.object({model:z.string(), status:z.literal("ok"), audit:resultSchema}),
+    z.object({model:z.string(), status:z.literal("failed"), error:z.string().max(180)}),
+  ])).max(4).optional(),
+});
+type PanelResult = z.infer<typeof panelResultSchema>;
 
 const AUDIT_JSON_SCHEMA = {
   type: "object",
@@ -218,26 +226,22 @@ function errorText(error: unknown): string {
 }
 
 async function invokeModel(env: Env, model: string, serialized: string, level: "standard" | "deep"): Promise<AuditResult> {
-  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, level)));
+  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, level, AUDIT_JSON_SCHEMA)));
 }
 
-async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
+async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<PanelResult> {
   const serialized = JSON.stringify(packet);
-  if (serialized.length > MAX_PACKET_CHARS) {
-    throw new Error(`review_packet_too_large:${serialized.length}>${MAX_PACKET_CHARS}`);
-  }
-
-  let lastError = "unknown";
-  for (const model of candidateModels(env, packet.review_level)) {
+  if (serialized.length > MAX_PACKET_CHARS) throw new Error("review_packet_too_large");
+  const reviews = await Promise.all(PANEL.map(async model => {
     try {
-      return await invokeModel(env, model, serialized, packet.review_level);
+      const audit = await invokeModel(env, model, serialized, packet.review_level);
+      return {model,status:"ok" as const,audit};
     } catch (error) {
-      lastError = errorText(error);
-      console.warn("auditor_model_attempt_failed", JSON.stringify({model, level: packet.review_level, error: lastError.slice(0, 300)}));
-      if (lastError.includes("auditor_inference_budget_exhausted:")) break;
+      console.warn("auditor_panel_member_failed", JSON.stringify({model,error:errorText(error).slice(0,180)}));
+      return {model,status:"failed" as const,error:errorText(error).slice(0,180)};
     }
-  }
-  throw new Error(lastError);
+  }));
+  return panelResultSchema.parse(aggregatePanel(reviews));
 }
 
 function guaranteedFallback(lastError: string): AuditResult {
@@ -328,7 +332,7 @@ function createServer(env: Env) {
   const server = new McpServer(
     { name: "kimi-vs-gpt-auditor", version: VERSION },
     {
-      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought.",
+      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought. The panel runs four independent reviews; inspect model_reviews and resolve disagreements with evidence. Confidence is a bounded agreement indicator, not a probability of correctness.",
     },
   );
 
@@ -337,11 +341,11 @@ function createServer(env: Env) {
     {
       description: "Give one compact independent critique of a proposed answer direction before a complex factual, analytical, research, troubleshooting, planning, recommendation, comparison, coding-plan, or consequential judgment answer. Never solve the underlying task or write code.",
       inputSchema: packetSchema,
-      outputSchema: resultSchema,
+      outputSchema: panelResultSchema,
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async (input) => {
-      let audit: AuditResult;
+      let audit: PanelResult;
       try {
         const packet = packetSchema.parse(input);
         audit = await runReview(env, packet);
@@ -369,7 +373,7 @@ export default {
         version: VERSION,
         standard_model: candidateModels(env, "standard")[0],
         deep_model: candidateModels(env, "deep")[0],
-        fallback_models: candidateModels(env, "standard").slice(1),
+        panel_models: PANEL,
         max_packet_chars: MAX_PACKET_CHARS,
         oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256", refresh_replay_grace_seconds: 30 },
         batch_review_calls: true,
