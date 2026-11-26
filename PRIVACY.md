@@ -14,7 +14,7 @@ The review packet is processed only to generate a short critique identifying mat
 
 ## AI processing and infrastructure
 
-The MCP service is hosted on Cloudflare Workers and uses Cloudflare Workers AI models. Each review packet is processed independently by four Cloudflare Workers AI models from DeepSeek, Google, Mistral AI and Meta; partial failures are reported.
+The MCP service is hosted on Cloudflare Workers and uses Cloudflare Workers AI models. Each review packet is processed by up to six Cloudflare Workers AI models from DeepSeek, Google, Mistral AI, Meta, Zhipu AI and Qwen; partial coverage is reported.
 
 The application does not intentionally persist review packets in an application database. Cloudflare infrastructure and observability features may process operational logs or telemetry according to the applicable Cloudflare service configuration and policies.
 

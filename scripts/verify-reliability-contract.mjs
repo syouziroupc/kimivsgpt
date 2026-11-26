@@ -11,14 +11,13 @@ const assertions = [
   [config.includes('"AUTH_RATE_LIMITER"'), "authentication rate limiter must remain configured"],
   [reliable.includes("AUDIT_RATE_LIMITER = undefined"), "standard limiter must be neutralized defensively"],
   [reliable.includes("DEEP_RATE_LIMITER = undefined"), "deep limiter must be neutralized defensively"],
-  [reliable.includes("GEMMA_TIMEOUT_MS = 22000"), "Gemma requires a separate bounded latency allowance"],
-  [reliable.includes("model === STANDARD_MODEL ? GEMMA_TIMEOUT_MS"), "Gemma-specific timeout must be applied"],
-  [reliable.includes("MODEL_CALL_TIMEOUT_MS = 12000"), "model calls need a 12s hard timeout"],
+  [reliable.includes("MODEL_CALL_TIMEOUT_MS = 23000"), "model timeout bounded"],
+  [reliable.includes("AUDITOR_DEADLINE_AT = startedAt + INFERENCE_BUDGET_MS"), "absolute deadline propagated"],
   [resilient.includes("resultSchema.safeParse(value)"), "incomplete results must fail closed"],
-  [resilient.includes("Promise.all(PANEL.map"), "all independent reviewers must run in parallel"],
+  [resilient.includes("await runPanel("), "resilient scheduler must be active"],
   [reliable.includes("INFERENCE_BUDGET_MS"), "review inference needs a bounded total budget"],
   [reliable.includes("rpcFailureResponse"), "MCP failures need a protocol response fallback"],
-  [reliable.includes("skip_retry_after_timeout"), "timed-out models must not consume a second full timeout"],
+  [reliable.includes("hedged_failover: true"), "hedged failover must be enabled"],
 ];
 
 for (const [ok, message] of assertions) {

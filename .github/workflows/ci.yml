@@ -17,6 +17,7 @@ jobs:
       - run: npm run test:concurrency
       - run: npm run test:reliability
       - run: node --experimental-strip-types scripts/verify-model-policy.mjs
+      - run: node --experimental-strip-types scripts/verify-panel-runner.mjs
       - run: npm run build-check
       - name: Validate plugin JSON
         shell: bash

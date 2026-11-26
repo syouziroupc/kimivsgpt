@@ -33,7 +33,7 @@ Automatically use `deep` when any of these apply:
 - the issue is unusually disputed and a mistaken conclusion would materially affect the user;
 - the user explicitly requests Kimi, deep review, rigorous audit, thorough verification, 徹底検証, 徹底監査, or equivalent wording.
 
-Do not use `deep` merely because the task is long. Use one tool call; the Worker runs four independent model reviews in parallel. Inspect model_reviews, including dissent and failures. Confidence is an uncalibrated agreement indicator. Resolve dissent using evidence; never interpret partial results as unanimous approval.
+Do not use `deep` merely because the task is long. Use one tool call; the Worker obtains a quorum of one frontier and three economy model reviews, with bounded independent reserves. Inspect model_reviews, including dissent and failures. Confidence is an uncalibrated agreement indicator. Resolve dissent using evidence; never interpret partial results as unanimous approval.
 
 ## Limited web verification
 

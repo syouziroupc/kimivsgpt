@@ -11,6 +11,7 @@ interface RateLimitBinding {
 }
 
 interface Env {
+  AUDITOR_DEADLINE_AT?: number;
   AI: {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
@@ -25,10 +26,12 @@ interface Env {
   OPENAI_APPS_CHALLENGE?: string;
 }
 
-import { candidateModels, modelInput, PANEL } from "./model-policy";
+import { candidateModels, modelInput, PANEL, DEEP_MODEL, FRONTIER_MODELS, FRONTIER_RESERVE, ECONOMY_RESERVE } from "./model-policy";
+import { runPanel } from "./panel-runner";
 import { aggregatePanel } from "./panel";
-const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.10.1-panel";
+// The input schema permits more than 5,000 chars. Retain all accepted fields, including escaped JSON.
+const MAX_PACKET_CHARS = 48000;
+const VERSION = "0.11.0-resilient-panel";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -52,7 +55,7 @@ Flag only material defects: anchoring; unsupported assumptions; missing alternat
 Do not manufacture disagreement. If no material defect exists, return proceed.
 Return only compact JSON with keys: verdict (proceed|revise|verify), risk (0-3), issues, verify, next_step, confidence (0-1).
 Each issue.type MUST be one of: anchoring, unsupported, missing_alternative, evidence_gap, stale_fact, alignment_bias, constraint_violation, scope_drift, overconfidence, other.
-issues: max 3 objects with type, target, correction. verify: max 2 short strings. Keep target <=120 chars, correction <=180, verify <=160, next_step <=180.`;
+issues: max 3, prefer 1-2 strongest material defects. verify: max 2. Use short concrete phrases: target <=70 chars, correction <=100, verify <=100, next_step <=100. Never fill unused slots. Answer in the packet language. All six keys are required.`;
 
 const issueType = z.enum(ISSUE_TYPES);
 
@@ -74,7 +77,8 @@ const panelResultSchema = resultSchema.extend({
   model_reviews: z.array(z.discriminatedUnion("status", [
     z.object({model:z.string(), status:z.literal("ok"), audit:resultSchema}),
     z.object({model:z.string(), status:z.literal("failed"), error:z.string().max(180)}),
-  ])).max(4).optional(),
+  ])).max(6).optional(),
+  coverage: z.object({valid:z.number().int().min(0).max(6),frontier:z.number().int().min(0).max(2),economy:z.number().int().min(0).max(4),complete:z.boolean()}).optional(),
 });
 type PanelResult = z.infer<typeof panelResultSchema>;
 
@@ -232,18 +236,15 @@ async function invokeModel(env: Env, model: string, serialized: string, level: "
 async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<PanelResult> {
   const serialized = JSON.stringify(packet);
   if (serialized.length > MAX_PACKET_CHARS) throw new Error("review_packet_too_large");
-  const reviews = await Promise.all(PANEL.map(async model => {
-    const started = Date.now();
-    try {
-      const audit = await invokeModel(env, model, serialized, packet.review_level);
-      console.info("auditor_panel_member_completed", JSON.stringify({model,elapsed_ms:Date.now()-started}));
-      return {model,status:"ok" as const,audit};
-    } catch (error) {
-      console.warn("auditor_panel_member_failed", JSON.stringify({model,elapsed_ms:Date.now()-started,error:errorText(error).slice(0,180)}));
-      return {model,status:"failed" as const,error:errorText(error).slice(0,180)};
-    }
-  }));
-  return panelResultSchema.parse(aggregatePanel(reviews));
+  const budgetMs = Math.min(23500, Math.max(0,(env.AUDITOR_DEADLINE_AT ?? Date.now()+23500)-Date.now()-250));
+  const reviews = await runPanel({
+    primary:PANEL.map(model=>({model,tier:model===DEEP_MODEL?"frontier":"economy"})),
+    reserve:[{model:FRONTIER_RESERVE,tier:"frontier"},{model:ECONOMY_RESERVE,tier:"economy"}],
+    budgetMs, hedgeMs:5500,
+    invoke:model=>invokeModel(env,model,serialized,packet.review_level),
+    onResult:(result,elapsed_ms)=>console.info("auditor_panel_member",JSON.stringify({model:result.model,status:result.status,elapsed_ms,...(result.status==="failed"?{error:result.error}:{})})),
+  });
+  return panelResultSchema.parse(aggregatePanel(reviews,FRONTIER_MODELS));
 }
 
 function guaranteedFallback(lastError: string): AuditResult {
@@ -334,7 +335,7 @@ function createServer(env: Env) {
   const server = new McpServer(
     { name: "kimi-vs-gpt-auditor", version: VERSION },
     {
-      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought. The panel runs four independent reviews; inspect model_reviews and resolve disagreements with evidence. Confidence is a bounded agreement indicator, not a probability of correctness.",
+      instructions: "Before finalizing substantive complex work (multi-step factual analysis, research, troubleshooting, planning, comparisons, recommendations, architecture or coding plans), call review_strategy exactly once with a compact summary of direction, claims and evidence. Skip simple chat, deterministic calculations, straightforward rewriting/translation and purely creative tasks. Use standard by default; deep only for materially consequential or unusually disputed judgments. Treat criticism as evidence to check, not authority. Never delegate the task or send hidden chain-of-thought. The panel requires one frontier and three economy reviewers from distinct model families; reserves replace slow or failed members. Inspect coverage and model_reviews; resolve disagreements with evidence. Confidence is a bounded agreement indicator, not a probability of correctness.",
     },
   );
 

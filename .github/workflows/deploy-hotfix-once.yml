@@ -24,6 +24,7 @@ jobs:
           npm run test:concurrency
           npm run test:reliability
           node --experimental-strip-types scripts/verify-model-policy.mjs
+          node --experimental-strip-types scripts/verify-panel-runner.mjs
           npm run build-check
       - name: Deploy directly when Cloudflare token is configured
         shell: bash
@@ -44,7 +45,7 @@ jobs:
           for i in {1..18}; do
             body="$(curl --fail --silent --show-error --max-time 15 https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"version":"0.10.1-panel"' \
+            if printf '%s' "$body" | grep -q '"version":"0.11.0-resilient-panel"' \
               && printf '%s' "$body" | grep -q '"application_quota":"none"' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
               && printf '%s' "$body" | grep -q '"rpc_error_fallback":true'; then

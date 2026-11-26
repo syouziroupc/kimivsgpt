@@ -2,11 +2,9 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 
 export { AuthState };
 
-import { candidateModels, DEEP_MODEL, STANDARD_MODEL, PANEL } from "./model-policy";
-const VERSION = "0.10.1-panel";
-const MODEL_CALL_TIMEOUT_MS = 12000;
-const FRONTIER_TIMEOUT_MS = 22000;
-const GEMMA_TIMEOUT_MS = 22000;
+import { candidateModels, PANEL, RESERVE_MODELS } from "./model-policy";
+const VERSION = "0.11.0-resilient-panel";
+const MODEL_CALL_TIMEOUT_MS = 23000;
 const INFERENCE_BUDGET_MS = 24500;
 const MCP_REQUEST_DEADLINE_MS = 28000;
 
@@ -46,7 +44,8 @@ async function withTimeout<T>(
 
 function buildReliableEnv(env: Env, startedAt: number): Env {
   const reliableEnv = { ...env } as Env;
-  const timedOutModels = new Set<string>();
+  // Per invocation absolute deadline; do not poison other calls in a JSON-RPC batch.
+  reliableEnv.AUDITOR_DEADLINE_AT = startedAt + INFERENCE_BUDGET_MS;
 
   // The review endpoint must never be rejected by our own application quota.
   // Authentication throttling remains intact because it does not limit valid reviews.
@@ -55,30 +54,14 @@ function buildReliableEnv(env: Env, startedAt: number): Env {
 
   reliableEnv.AI = {
     run: async (model: string, input: Record<string, unknown>): Promise<unknown> => {
-      if (timedOutModels.has(model)) {
-        throw new Error(`auditor_skip_retry_after_timeout:${model}`);
-      }
-
       const elapsed = Date.now() - startedAt;
       const remaining = INFERENCE_BUDGET_MS - elapsed;
       if (remaining <= 500) {
         throw new Error(`auditor_inference_budget_exhausted:${elapsed}ms`);
       }
 
-      const timeoutMs = Math.max(500, Math.min(model === DEEP_MODEL ? FRONTIER_TIMEOUT_MS : model === STANDARD_MODEL ? GEMMA_TIMEOUT_MS : MODEL_CALL_TIMEOUT_MS, remaining - 250));
-      try {
-        return await withTimeout(
-          env.AI.run(model, input),
-          timeoutMs,
-          `auditor_model_timeout:${model}`,
-          () => timedOutModels.add(model),
-        );
-      } catch (error) {
-        if (errorText(error).startsWith("auditor_model_timeout:")) {
-          timedOutModels.add(model);
-        }
-        throw error;
-      }
+      const timeoutMs = Math.max(500, Math.min(MODEL_CALL_TIMEOUT_MS, remaining - 250));
+      return withTimeout(env.AI.run(model,input),timeoutMs,`auditor_model_timeout:${model}`);
     },
   };
 
@@ -129,8 +112,8 @@ export default {
         standard_models: candidateModels(env, "standard"),
         deep_models: candidateModels(env, "deep"),
         panel_models: PANEL,
-        frontier_timeout_ms: FRONTIER_TIMEOUT_MS,
-        gemma_timeout_ms: GEMMA_TIMEOUT_MS,
+        reserve_models: RESERVE_MODELS,
+        required_coverage: {frontier:1,economy:3},
         application_quota: "none",
         review_rate_limit: "none",
         auth_rate_limit: "enabled",
@@ -138,12 +121,13 @@ export default {
           per_model_timeout_ms: MODEL_CALL_TIMEOUT_MS,
           inference_budget_ms: INFERENCE_BUDGET_MS,
           mcp_request_deadline_ms: MCP_REQUEST_DEADLINE_MS,
-          skip_same_model_retry_after_timeout: true,
+          hedged_failover: true,
+          max_model_attempts: 6,
           parallel_panel: true,
           schema_fallback: true,
           rpc_error_fallback: true,
         },
-        response_guarantee: "bounded MCP response; four independent reviews with explicit partial-panel status",
+        response_guarantee: "bounded MCP response; quorum of one frontier and three economy reviews or explicit partial status",
       });
     }
 

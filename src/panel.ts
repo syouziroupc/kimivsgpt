@@ -7,10 +7,13 @@ export type Audit = {
   confidence: number;
 };
 export type PanelReview = {model: string; status: "ok"; audit: Audit} | {model: string; status: "failed"; error: string};
-export function aggregatePanel(reviews: PanelReview[]): Audit & {model_reviews: PanelReview[]} {
-  const good = reviews.filter((r): r is Extract<PanelReview,{status:"ok"}> => r.status === "ok");
+export function aggregatePanel(reviews: PanelReview[], frontierModels: readonly string[]): Audit & {model_reviews: PanelReview[]; coverage:{valid:number;frontier:number;economy:number;complete:boolean}} {
+  const good = [...new Map(reviews.filter((r): r is Extract<PanelReview,{status:"ok"}> => r.status === "ok").map(r=>[r.model,r])).values()];
+  const frontier = good.filter(r=>frontierModels.includes(r.model)).length;
+  const economy = good.length-frontier;
+  const coverage = {valid:good.length,frontier,economy,complete:frontier>=1 && economy>=3};
   const votes = good.map(r => r.audit.verdict);
-  const missing = reviews.length !== 4 || good.length !== 4;
+  const missing = !coverage.complete;
   const disagreement = new Set(votes).size > 1;
   const issues: Audit["issues"] = [];
   const verify: string[] = [];
@@ -24,7 +27,7 @@ export function aggregatePanel(reviews: PanelReview[]): Audit & {model_reviews: 
     if(!seen.has(key)){seen.add(key);issues.push(item);}
   }
   if(missing || disagreement) {
-    verify.push(missing ? "Incomplete panel: "+good.length+"/4 validated. Do not treat missing votes as agreement." : "Model verdicts disagree. Resolve material differences against independent evidence.");
+    verify.push(missing ? "Incomplete panel: "+frontier+" frontier, "+economy+" economy. Require >=1 frontier and >=3 economy." : "Model verdicts disagree. Resolve material differences against independent evidence.");
   }
   for(const r of ordered) for(const v of r.audit.verify) if(!verify.includes(v))verify.push(v);
   const risk = Math.max(missing || disagreement ? 2 : 0,...good.map(r=>r.audit.risk));
@@ -32,5 +35,5 @@ export function aggregatePanel(reviews: PanelReview[]): Audit & {model_reviews: 
   const summary = reviews.map(r=>r.model.split("/").pop()+":"+(r.status==="ok"?r.audit.verdict:"failed")).join(" | ");
   // A bounded compatibility score, not a calibrated probability or averaged self-rating.
   const confidence = missing ? 0.1 : disagreement ? 0.25 : verdict==="proceed" ? 0.6 : 0.4;
-  return {verdict,risk,issues:issues.slice(0,3),verify:verify.slice(0,2),next_step:summary.slice(0,180),confidence,model_reviews:reviews};
+  return {verdict,risk,issues:issues.slice(0,3),verify:verify.slice(0,2),next_step:summary.slice(0,180),confidence,model_reviews:reviews,coverage};
 }
