@@ -31,15 +31,13 @@ The critic never writes the user's final answer, performs the primary research, 
 
 ## Cost controls
 
-- Standard model: `@cf/zai-org/glm-5.3-flash`
-- Deep model: `@cf/moonshotai/kimi-k2.6`
-- Kimi is reserved for materially high-stakes, irreversible, security-sensitive, or unusually disputed decisions; task length alone does not justify it
-- Completion cap: 360 tokens
-- Review packet hard cap: 5,000 characters
-- Maximum three issues and two verification requests
-- One review call per substantive answer by default
-- Standard review uses one model call; minor schema variation is normalized locally rather than retried
-- Cloudflare rate limits: standard 30/minute, deep 3/minute
+- Standard model: `@cf/qwen/qwen3.8-27b`
+- Deep model: `@cf/deepseek-ai/deepseek-v4.1-flash-1017`
+- Alternatives: `@cf/zai-org/glm-5.3`, `@cf/google/gemma-4-26b-a4b-it`; standard and deep candidates also cross-failover.
+- Retired model overrides are ignored. Each candidate is attempted once within the shared 24.5-second inference budget; invalid JSON or schema failures trigger failover.
+- Completion cap: 900 standard / 1200 deep tokens. Review packet hard cap: 5,000 characters.
+- Maximum three issues and two verification requests; no application review quota. Authentication throttling remains enabled.
+- If all models fail, return explicit verify/evidence_gap with low confidence; never interpret missing or malformed output as a passed audit.
 
 ## Try as a local personal plugin on Windows
 

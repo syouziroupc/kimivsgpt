@@ -2,8 +2,9 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 
 export { AuthState };
 
-const VERSION = "0.8.1-reliable";
-const MODEL_CALL_TIMEOUT_MS = 12000;
+import { candidateModels } from "./model-policy";
+const VERSION = "0.9.0-reliable";
+const MODEL_CALL_TIMEOUT_MS = 8000;
 const INFERENCE_BUDGET_MS = 24500;
 const MCP_REQUEST_DEADLINE_MS = 28000;
 
@@ -42,7 +43,7 @@ async function withTimeout<T>(
 }
 
 function buildReliableEnv(env: Env, startedAt: number): Env {
-  const reliableEnv = Object.create(env) as Env;
+  const reliableEnv = { ...env } as Env;
   const timedOutModels = new Set<string>();
 
   // The review endpoint must never be rejected by our own application quota.
@@ -123,6 +124,8 @@ export default {
         ok: true,
         service: "kimi-vs-gpt-auditor",
         version: VERSION,
+        standard_models: candidateModels(env, "standard"),
+        deep_models: candidateModels(env, "deep"),
         application_quota: "none",
         review_rate_limit: "none",
         auth_rate_limit: "enabled",

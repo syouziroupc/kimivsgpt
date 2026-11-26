@@ -26,8 +26,7 @@ interface Env {
   OPENAI_APPS_CHALLENGE?: string;
 }
 
-const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
-const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
+import { candidateModels, modelInput } from "./model-policy";
 const MAX_PACKET_CHARS = 5000;
 const VERSION = "0.5.5";
 const DEFAULT_DAILY_STANDARD_LIMIT = 100;
@@ -130,44 +129,9 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 }
 
 function normalizeAudit(value: unknown): AuditResult {
-  const root = asRecord(value);
-  if (!root) throw new Error("auditor_returned_non_object_json");
-
-  const rawIssues = Array.isArray(root.issues) ? root.issues : [];
-  const issues = rawIssues.slice(0, 3).map((item) => {
-    const rec = asRecord(item) ?? {};
-    const rawType = shortText(rec.type, 64);
-    const type = ISSUE_TYPE_SET.has(rawType) ? rawType : "other";
-    return {
-      type,
-      target: shortText(rec.target, 120),
-      correction: shortText(rec.correction ?? rec.reason ?? rec.fix, 180),
-    };
-  }).filter((item) => item.target.length > 0 || item.correction.length > 0);
-
-  const rawVerify = Array.isArray(root.verify) ? root.verify : [];
-  const verify = rawVerify
-    .slice(0, 2)
-    .map((item) => shortText(item, 160))
-    .filter(Boolean);
-
-  const rawVerdict = shortText(root.verdict, 16);
-  const verdict = rawVerdict === "proceed" || rawVerdict === "revise" || rawVerdict === "verify"
-    ? rawVerdict
-    : verify.length > 0
-      ? "verify"
-      : issues.length > 0
-        ? "revise"
-        : "proceed";
-
-  return resultSchema.parse({
-    verdict,
-    risk: Math.round(clampNumber(root.risk, 0, 3, issues.length > 0 ? 1 : 0)),
-    issues,
-    verify,
-    next_step: shortText(root.next_step ?? root.nextStep, 180),
-    confidence: clampNumber(root.confidence, 0, 1, 0.5),
-  });
+  const parsed = resultSchema.safeParse(value);
+  if (!parsed.success) throw new Error("auditor_invalid_schema");
+  return parsed.data;
 }
 
 function extractTextContent(content: unknown): string | null {
@@ -329,44 +293,12 @@ async function releaseDailyBudget(env: Env, level: "standard" | "deep"): Promise
   await getAuthState(env).releaseUsage(level);
 }
 
-function isKimi26Model(model: string): boolean {
-  return model.includes("moonshotai/kimi-k2.6");
-}
-
 async function invokeModel(env: Env, model: string, serialized: string): Promise<AuditResult> {
-  const kimi26 = isKimi26Model(model);
-  const systemPrompt = kimi26
-    ? `${AUDITOR_PROMPT}
-For this request, do not print the audit JSON in message content. Call submit_audit exactly once with the complete audit object as its arguments.`
-    : AUDITOR_PROMPT;
-  const input: Record<string, unknown> = {
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: serialized },
-    ],
-    max_completion_tokens: kimi26 ? 512 : 360,
-    temperature: 0,
-    stream: false,
-  };
-  if (kimi26) {
-    input.chat_template_kwargs = { thinking: false };
-    input.tools = [{
-      name: "submit_audit",
-      description: "Return the compact audit result. Call exactly once and do not answer in prose.",
-      parameters: AUDIT_JSON_SCHEMA,
-    }];
-    input.tool_choice = "required";
-    input.parallel_tool_calls = false;
-    return parseKimiAudit(await env.AI.run(model, input));
-  }
-  input.reasoning_effort = "low";
-  return parseAudit(await env.AI.run(model, input));
+  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, "standard")));
 }
 
 async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
-  const standard = env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL;
-  const deep = env.AUDITOR_MODEL_DEEP || DEEP_MODEL;
-  const selected = packet.review_level === "deep" ? deep : standard;
+  const selected = candidateModels(env, packet.review_level)[0];
   const serialized = JSON.stringify(packet);
 
   if (serialized.length > MAX_PACKET_CHARS) {
@@ -785,8 +717,8 @@ export default {
         ok: true,
         service: "kimi-vs-gpt-auditor",
         version: VERSION,
-        standard_model: env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL,
-        deep_model: env.AUDITOR_MODEL_DEEP || DEEP_MODEL,
+        standard_model: candidateModels(env, "standard")[0],
+        deep_model: candidateModels(env, "deep")[0],
         max_packet_chars: MAX_PACKET_CHARS,
         oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256", refresh_replay_grace_seconds: 30 },
         batch_review_calls: true,

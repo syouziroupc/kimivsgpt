@@ -18,8 +18,13 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: Validate Worker bundle
-        run: npm run build-check
+      - name: Validate Worker bundle and contracts
+        run: |
+          npm run type-check
+          npm run test:concurrency
+          npm run test:reliability
+          node --experimental-strip-types scripts/verify-model-policy.mjs
+          npm run build-check
       - name: Deploy directly when Cloudflare token is configured
         shell: bash
         env:
@@ -39,7 +44,7 @@ jobs:
           for i in {1..18}; do
             body="$(curl --fail --silent --show-error --max-time 15 https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"version":"0.8.0-reliable"' \
+            if printf '%s' "$body" | grep -q '"version":"0.9.0-reliable"' \
               && printf '%s' "$body" | grep -q '"application_quota":"none"' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
               && printf '%s' "$body" | grep -q '"rpc_error_fallback":true'; then

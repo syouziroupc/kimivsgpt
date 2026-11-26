@@ -25,11 +25,9 @@ interface Env {
   OPENAI_APPS_CHALLENGE?: string;
 }
 
-const STANDARD_MODEL = "@cf/zai-org/glm-5.3-flash";
-const DEEP_MODEL = "@cf/moonshotai/kimi-k2.6";
-const KIMI_FALLBACK_MODEL = "@cf/moonshotai/kimi-k2.7-code";
+import { candidateModels, modelInput } from "./model-policy";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.7.1-resilient";
+const VERSION = "0.9.0-resilient";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -128,37 +126,9 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 }
 
 function normalizeAudit(value: unknown): AuditResult {
-  const root = asRecord(value);
-  if (!root) throw new Error("auditor_returned_non_object_json");
-
-  const rawIssues = Array.isArray(root.issues) ? root.issues : [];
-  const issues = rawIssues.slice(0, 3).map((item) => {
-    const rec = asRecord(item) ?? {};
-    const rawType = shortText(rec.type, 64);
-    const type = ISSUE_TYPE_SET.has(rawType) ? rawType : "other";
-    return {
-      type,
-      target: shortText(rec.target, 120),
-      correction: shortText(rec.correction ?? rec.reason ?? rec.fix, 180),
-    };
-  }).filter((item) => item.target.length > 0 || item.correction.length > 0);
-
-  const rawVerify = Array.isArray(root.verify) ? root.verify : [];
-  const verify = rawVerify.slice(0, 2).map((item) => shortText(item, 160)).filter(Boolean);
-
-  const rawVerdict = shortText(root.verdict, 16);
-  const verdict = rawVerdict === "proceed" || rawVerdict === "revise" || rawVerdict === "verify"
-    ? rawVerdict
-    : verify.length > 0 ? "verify" : issues.length > 0 ? "revise" : "proceed";
-
-  return resultSchema.parse({
-    verdict,
-    risk: Math.round(clampNumber(root.risk, 0, 3, issues.length > 0 ? 1 : 0)),
-    issues,
-    verify,
-    next_step: shortText(root.next_step ?? root.nextStep, 180),
-    confidence: clampNumber(root.confidence, 0, 1, 0.5),
-  });
+  const parsed = resultSchema.safeParse(value);
+  if (!parsed.success) throw new Error("auditor_invalid_schema");
+  return parsed.data;
 }
 
 function extractTextContent(content: unknown): string | null {
@@ -243,144 +213,12 @@ function parseAudit(raw: unknown): AuditResult {
   return normalizeAudit(value);
 }
 
-function parseToolAudit(raw: unknown): AuditResult {
-  const rawRoot = asRecord(raw);
-  const responseRoot = rawRoot ? asRecord(rawRoot.response) : null;
-  const root = responseRoot ?? rawRoot;
-  let calls: unknown[] | null = root && Array.isArray(root.tool_calls) ? root.tool_calls : null;
-  if ((!calls || calls.length === 0) && root && Array.isArray(root.choices)) {
-    const first = asRecord(root.choices[0]);
-    const message = asRecord(first?.message);
-    if (message && Array.isArray(message.tool_calls)) calls = message.tool_calls;
-  }
-  if (!calls || calls.length === 0) throw new Error("auditor_missing_tool_call");
-  for (const item of calls) {
-    const call = asRecord(item);
-    if (!call) continue;
-    const fn = asRecord(call.function);
-    const name = shortText(call.name ?? fn?.name, 64);
-    if (name !== "submit_audit") continue;
-    let args: unknown = call.arguments ?? fn?.arguments;
-    if (typeof args === "string") {
-      const argText = args;
-      try { args = JSON.parse(argText); }
-      catch { args = parseJsonString(argText); }
-    }
-    return normalizeAudit(args);
-  }
-  throw new Error("auditor_missing_submit_audit_call");
-}
-
-function parseKimiAudit(raw: unknown): AuditResult {
-  try { return parseToolAudit(raw); }
-  catch (toolError) {
-    try { return parseAudit(raw); }
-    catch (textError) {
-      throw new Error(`auditor_kimi_output_unreadable:${errorText(toolError)}:${errorText(textError)}`);
-    }
-  }
-}
-
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function retryDelayMs(attempt: number): number {
-  return attempt <= 0 ? 0 : 250;
-}
-
-function isKimiModel(model: string): boolean {
-  return model.includes("moonshotai/kimi-");
-}
-
-function isKimi26Model(model: string): boolean {
-  return model.includes("moonshotai/kimi-k2.6");
-}
-
-function shouldRetrySameModel(error: string): boolean {
-  const normalized = error.toLowerCase();
-  const failoverNow = [
-    "auditor_model_timeout:",
-    "auditor_skip_retry_after_timeout:",
-    "auditor_inference_budget_exhausted:",
-    "capacity temporarily exceeded",
-    "out of capacity",
-    "model requires workers paid plan",
-    "daily free allocation",
-    "account limited",
-    "5035",
-    "3040",
-    "3036",
-    "http 429",
-    "status 429",
-    "http 403",
-    "status 403",
-  ];
-  if (failoverNow.some((marker) => normalized.includes(marker))) return false;
-
-  return [
-    "auditor_invalid_json",
-    "auditor_returned_no_json",
-    "auditor_returned_non_object_json",
-    "auditor_missing_tool_call",
-    "auditor_missing_submit_audit_call",
-    "auditor_invalid_tool_arguments",
-    "auditor_kimi_output_unreadable",
-    "auditor_empty_content",
-  ].some((marker) => normalized.includes(marker));
-}
-
-function candidateModels(env: Env, level: "standard" | "deep"): string[] {
-  const configured = level === "deep"
-    ? env.AUDITOR_MODEL_DEEP || DEEP_MODEL
-    : env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL;
-  const models = level === "deep"
-    ? [configured, KIMI_FALLBACK_MODEL]
-    : [configured, DEEP_MODEL, KIMI_FALLBACK_MODEL];
-  return Array.from(new Set(models.filter(Boolean)));
-}
-
-async function invokeModel(env: Env, model: string, serialized: string, level: "standard" | "deep", retry: boolean): Promise<AuditResult> {
-  const retryInstruction = retry
-    ? "\nPrevious generation failed transport or schema validation. Return exactly one complete schema-valid result now."
-    : "";
-  const kimi = isKimiModel(model);
-  const systemPrompt = kimi
-    ? `${AUDITOR_PROMPT}${retryInstruction}\nFor this request, call submit_audit exactly once with the complete audit object as its arguments. Do not print the audit JSON in message content.`
-    : `${AUDITOR_PROMPT}${retryInstruction}`;
-
-  const input: Record<string, unknown> = {
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: serialized },
-    ],
-    temperature: 0,
-    stream: false,
-    max_completion_tokens: level === "deep" ? 700 : 420,
-  };
-
-  if (kimi) {
-    // This auditor needs a short, forced structured result, not long-form chain reasoning.
-    // K2.6 defaults to high reasoning, which can consume the whole bounded request window
-    // before the required tool call is emitted. Disable it explicitly.
-    input.chat_template_kwargs = { thinking: false };
-    if (isKimi26Model(model)) input.reasoning_effort = "none";
-    input.tools = [{
-      name: "submit_audit",
-      description: "Return the compact audit result. Call exactly once and do not answer in prose.",
-      parameters: AUDIT_JSON_SCHEMA,
-    }];
-    input.tool_choice = "required";
-    input.parallel_tool_calls = false;
-    return parseKimiAudit(await env.AI.run(model, input));
-  }
-
-  input.reasoning_effort = "low";
-  return parseAudit(await env.AI.run(model, input));
+async function invokeModel(env: Env, model: string, serialized: string, level: "standard" | "deep"): Promise<AuditResult> {
+  return parseAudit(await env.AI.run(model, modelInput(model, AUDITOR_PROMPT, serialized, level)));
 }
 
 async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promise<AuditResult> {
@@ -391,21 +229,12 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
 
   let lastError = "unknown";
   for (const model of candidateModels(env, packet.review_level)) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const delay = retryDelayMs(attempt);
-        if (delay > 0) await sleep(delay);
-        return await invokeModel(env, model, serialized, packet.review_level, attempt > 0);
-      } catch (error) {
-        lastError = errorText(error);
-        console.warn("auditor_model_attempt_failed", JSON.stringify({
-          model,
-          level: packet.review_level,
-          attempt: attempt + 1,
-          error: lastError.slice(0, 300),
-        }));
-        if (!shouldRetrySameModel(lastError)) break;
-      }
+    try {
+      return await invokeModel(env, model, serialized, packet.review_level);
+    } catch (error) {
+      lastError = errorText(error);
+      console.warn("auditor_model_attempt_failed", JSON.stringify({model, level: packet.review_level, error: lastError.slice(0, 300)}));
+      if (lastError.includes("auditor_inference_budget_exhausted:")) break;
     }
   }
   throw new Error(lastError);
@@ -418,10 +247,10 @@ function guaranteedFallback(lastError: string): AuditResult {
     issues: [{
       type: "evidence_gap",
       target: "Independent external audit result",
-      correction: "No validated model audit was obtained after bounded retries and model failover; verify material claims independently.",
+      correction: "No validated model audit was obtained after bounded model failover; verify material claims independently.",
     }],
     verify: [
-      "No schema-valid model audit was obtained after automatic retries and failover.",
+      "No schema-valid model audit was obtained after automatic model failover.",
       `Last upstream error: ${lastError.slice(0, 120)}`,
     ],
     next_step: "Proceed only with independently verified evidence; the auditor will automatically retry models on the next call.",
@@ -538,9 +367,9 @@ export default {
         ok: true,
         service: "kimi-vs-gpt-auditor",
         version: VERSION,
-        standard_model: env.AUDITOR_MODEL_STANDARD || STANDARD_MODEL,
-        deep_model: env.AUDITOR_MODEL_DEEP || DEEP_MODEL,
-        fallback_model: KIMI_FALLBACK_MODEL,
+        standard_model: candidateModels(env, "standard")[0],
+        deep_model: candidateModels(env, "deep")[0],
+        fallback_models: candidateModels(env, "standard").slice(1),
         max_packet_chars: MAX_PACKET_CHARS,
         oauth: { enabled: true, owner_secret_configured: Boolean(env.OWNER_AUTH_SECRET), pkce: "S256", refresh_replay_grace_seconds: 30 },
         batch_review_calls: true,

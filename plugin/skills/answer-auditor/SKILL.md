@@ -33,7 +33,7 @@ Automatically use `deep` when any of these apply:
 - the issue is unusually disputed and a mistaken conclusion would materially affect the user;
 - the user explicitly requests Kimi, deep review, rigorous audit, thorough verification, 徹底検証, 徹底監査, or equivalent wording.
 
-Do not use `deep` merely because the task is long. Preserve the Worker's daily deep limit and never retry deep automatically after a model failure.
+Do not use `deep` merely because the task is long. Use one tool call; the Worker handles bounded model failover internally. An evidence-gap fallback indicating no validated model audit is not a successful independent review.
 
 ## Limited web verification
 
