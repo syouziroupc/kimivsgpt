@@ -7,6 +7,12 @@ assert.equal(candidateModels(old,"deep")[0],DEEP_MODEL);
 assert.equal(new Set(PANEL).size,4);
 assert.equal(new Set(PANEL.map(m=>m.split("/")[1])).size,4);
 assert.equal(modelInput(DEEP_MODEL,"a","b","deep").reasoning_effort,"high");
+for (const level of ["standard","deep"]) {
+  const gemma = modelInput(STANDARD_MODEL,"a","b",level);
+  assert.equal(gemma.chat_template_kwargs.enable_thinking,false);
+  assert.equal(gemma.max_completion_tokens,850);
+  assert.equal(gemma.response_format.type,"json_object");
+}
 const audit={verdict:"proceed",risk:0,issues:[],verify:[],next_step:"none",confidence:1};
 const full=PANEL.map(model=>({model,status:"ok",audit}));
 assert.equal(aggregatePanel(full).verdict,"proceed");

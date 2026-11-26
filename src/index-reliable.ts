@@ -2,10 +2,11 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 
 export { AuthState };
 
-import { candidateModels, DEEP_MODEL, PANEL } from "./model-policy";
-const VERSION = "0.10.0-panel";
+import { candidateModels, DEEP_MODEL, STANDARD_MODEL, PANEL } from "./model-policy";
+const VERSION = "0.10.1-panel";
 const MODEL_CALL_TIMEOUT_MS = 12000;
 const FRONTIER_TIMEOUT_MS = 22000;
+const GEMMA_TIMEOUT_MS = 22000;
 const INFERENCE_BUDGET_MS = 24500;
 const MCP_REQUEST_DEADLINE_MS = 28000;
 
@@ -64,7 +65,7 @@ function buildReliableEnv(env: Env, startedAt: number): Env {
         throw new Error(`auditor_inference_budget_exhausted:${elapsed}ms`);
       }
 
-      const timeoutMs = Math.max(500, Math.min(model === DEEP_MODEL ? FRONTIER_TIMEOUT_MS : MODEL_CALL_TIMEOUT_MS, remaining - 250));
+      const timeoutMs = Math.max(500, Math.min(model === DEEP_MODEL ? FRONTIER_TIMEOUT_MS : model === STANDARD_MODEL ? GEMMA_TIMEOUT_MS : MODEL_CALL_TIMEOUT_MS, remaining - 250));
       try {
         return await withTimeout(
           env.AI.run(model, input),
@@ -129,6 +130,7 @@ export default {
         deep_models: candidateModels(env, "deep"),
         panel_models: PANEL,
         frontier_timeout_ms: FRONTIER_TIMEOUT_MS,
+        gemma_timeout_ms: GEMMA_TIMEOUT_MS,
         application_quota: "none",
         review_rate_limit: "none",
         auth_rate_limit: "enabled",

@@ -28,7 +28,7 @@ interface Env {
 import { candidateModels, modelInput, PANEL } from "./model-policy";
 import { aggregatePanel } from "./panel";
 const MAX_PACKET_CHARS = 5000;
-const VERSION = "0.10.0-panel";
+const VERSION = "0.10.1-panel";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -233,11 +233,13 @@ async function runReview(env: Env, packet: z.infer<typeof packetSchema>): Promis
   const serialized = JSON.stringify(packet);
   if (serialized.length > MAX_PACKET_CHARS) throw new Error("review_packet_too_large");
   const reviews = await Promise.all(PANEL.map(async model => {
+    const started = Date.now();
     try {
       const audit = await invokeModel(env, model, serialized, packet.review_level);
+      console.info("auditor_panel_member_completed", JSON.stringify({model,elapsed_ms:Date.now()-started}));
       return {model,status:"ok" as const,audit};
     } catch (error) {
-      console.warn("auditor_panel_member_failed", JSON.stringify({model,error:errorText(error).slice(0,180)}));
+      console.warn("auditor_panel_member_failed", JSON.stringify({model,elapsed_ms:Date.now()-started,error:errorText(error).slice(0,180)}));
       return {model,status:"failed" as const,error:errorText(error).slice(0,180)};
     }
   }));

@@ -33,7 +33,7 @@ The critic never writes the user's final answer, performs the primary research, 
 
 - Four parallel independent reviews: DeepSeek V4.1 Flash (frontier); Gemma 4 26B, Mistral Small 3.1 24B, Llama 4 Scout (economy).
 - Each result is strictly schema-validated and returned in model_reviews. Missing or conflicting votes prevent proceed. One material revise vote is retained; max risk is preserved. Confidence is an uncalibrated bounded agreement indicator.
-- Shared 24.5s inference budget; frontier up to 22s, economy up to 12s; no retries per model.
+- Shared 24.5s inference budget; frontier and Gemma up to 22s, remaining economy models up to 12s; no retries per model.
 - Four upstream inference calls per review; cost depends on actual tokens.
 
 ## Try as a local personal plugin on Windows
@@ -92,3 +92,5 @@ Production deployment is owned by `syouziroupc/CPCV/.github/workflows/deploy-kim
 ## Security
 
 `npm audit --omit=dev` reported zero production dependency vulnerabilities on 2026-09-08. CI validates dependency audit, TypeScript, Wrangler dry-run bundling, plugin JSON, and the Windows PowerShell installer syntax.
+
+Gemma uses `chat_template_kwargs.enable_thinking=false` and an 850-token completion cap. Model latency is recorded without logging review input.

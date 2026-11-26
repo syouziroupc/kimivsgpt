@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in {1..36}; do
-            if curl -fsS --max-time 10 https://kimivsgpt.syouziroupc.workers.dev/health | grep -q '"version":"0.10.0-panel"'; then exit 0; fi
+            if curl -fsS --max-time 10 https://kimivsgpt.syouziroupc.workers.dev/health | grep -q '"version":"0.10.1-panel"'; then exit 0; fi
             sleep 5
           done
           exit 1
