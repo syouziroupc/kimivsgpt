@@ -3,7 +3,7 @@
 Dependencies: LibreOffice (Office), PyMuPDF (PDF), Pillow (images),
 Playwright + Chromium (HTML/SVG). No cloud storage or external renderer.
 """
-import argparse, base64, hashlib, io, json, os, pathlib, shutil, subprocess, tempfile
+import argparse, base64, hashlib, io, json, os, pathlib, re, shutil, subprocess, tempfile
 import urllib.request, urllib.error, zipfile, xml.etree.ElementTree as ET
 
 ENDPOINT = "https://kimivsgpt.syouziroupc.workers.dev/visual"
@@ -90,7 +90,23 @@ def web_pages(path):
                 failures=[]
                 page.on("requestfailed", lambda req: failures.append(req.resource_type))
                 page.on("response", lambda res: failures.append(res.request.resource_type) if res.status >= 400 else None)
-                page.goto(path.as_uri(),wait_until="load",timeout=15000)
+                if path.suffix.lower()==".svg":
+                    raw=path.read_text(encoding="utf-8-sig")
+                    root=ET.fromstring(raw)
+                    if root.tag!="{http://www.w3.org/2000/svg}svg": raise ValueError("Invalid SVG root")
+                    for node in root.iter():
+                        for key,val in node.attrib.items():
+                            if key.split("}")[-1] in ("href","src") and not val.startswith(("#","data:")):
+                                raise ValueError("SVG external resource requires producer manifest")
+                        if node.tag.split("}")[-1] in ("script","foreignObject"):
+                            raise ValueError("Active SVG requires producer manifest")
+                    urls=re.findall(r"url\(\s*['\"]?([^)'\"]+)",raw,re.I)
+                    if any(not u.strip().startswith(("#","data:")) for u in urls) or re.search(r"@import",raw,re.I):
+                        raise ValueError("SVG external CSS requires producer manifest")
+                    raw=re.sub(r"^\s*<\?xml[^?]*\?>","",raw,count=1)
+                    page.set_content("<!doctype html><html><body style='margin:0'>"+raw+"</body></html>",wait_until="load",timeout=15000)
+                else:
+                    page.goto(path.as_uri(),wait_until="load",timeout=15000)
                 page.evaluate("document.fonts.ready")
                 if failures: raise ValueError("Web assets unavailable in offline renderer; supply complete producer manifest")
                 h=page.evaluate("Math.max(document.documentElement.scrollHeight,document.body?.scrollHeight||0)")
