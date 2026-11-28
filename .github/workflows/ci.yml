@@ -31,3 +31,18 @@ jobs:
         run: |
           $text = Get-Content -Raw -Path ./install-local.ps1
           [void][scriptblock]::Create($text)
+
+  render-fixtures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-impress libreoffice-writer libreoffice-calc fonts-noto-cjk
+          python -m pip install pymupdf Pillow python-pptx python-docx openpyxl playwright
+          python -m playwright install --with-deps chromium
+      - run: python scripts/verify-artifact-render.py

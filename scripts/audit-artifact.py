@@ -87,13 +87,17 @@ def web_pages(path):
                 context=browser.new_context(viewport={"width":width,"height":height},device_scale_factor=1,service_workers="block")
                 context.route("**/*",lambda route: route.continue_() if route.request.url.startswith(("file:","data:","blob:")) else route.abort())
                 page=context.new_page()
+                failures=[]
+                page.on("requestfailed", lambda req: failures.append(req.resource_type))
+                page.on("response", lambda res: failures.append(res.request.resource_type) if res.status >= 400 else None)
                 page.goto(path.as_uri(),wait_until="load",timeout=15000)
                 page.evaluate("document.fonts.ready")
+                if failures: raise ValueError("Web assets unavailable in offline renderer; supply complete producer manifest")
                 h=page.evaluate("Math.max(document.documentElement.scrollHeight,document.body?.scrollHeight||0)")
                 if h>10000: raise ValueError("long web page: provide viewport/section screenshots in manifest")
                 overflow=page.evaluate("document.documentElement.scrollWidth > innerWidth+1")
                 shot=page.screenshot(full_page=True,animations="disabled")
-                pages.append((normalize(shot),page.locator("body").inner_text()[:12000],["Horizontal viewport overflow"] if overflow else []))
+                pages.append((normalize(shot),page.evaluate("document.body?.innerText || document.documentElement?.textContent || \"\"")[:12000],["Horizontal viewport overflow"] if overflow else []))
                 context.close()
         finally: browser.close()
     return pages

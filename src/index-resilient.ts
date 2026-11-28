@@ -32,7 +32,7 @@ import { aggregatePanel } from "./panel";
 import { visualFileSchema, visualResultSchema, reviewVisualFile, reviewVisualRequest } from "./visual-audit";
 // The input schema permits more than 5,000 chars. Retain all accepted fields, including escaped JSON.
 const MAX_PACKET_CHARS = 48000;
-const VERSION = "0.11.0-resilient-panel";
+const VERSION = "0.12.0-artifact-audit";
 
 const ISSUE_TYPES = [
   "anchoring",
