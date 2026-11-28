@@ -26,11 +26,11 @@ with tempfile.TemporaryDirectory() as root:
     assert all(Image.open(audit.io.BytesIO(x[0])).width>500 for x in pages)
     d=Document(); d.add_paragraph("DOCX_AUDIT_123"); p=src/"doc.docx"; d.save(p)
     pages,_=audit.render(p,work,None); assert len(pages)==1 and "DOCX_AUDIT_123" in pages[0][1]
-    w=Workbook(); w.active["A1"]="SHEET_VISIBLE"; w.active["C3"]="OUTSIDE_PRINT"; w.active.print_area="A1:A1"
-    s=w.create_sheet("Hidden"); s["A1"]="SHEET_HIDDEN"; s.sheet_state="hidden"
+    w=Workbook(); w.active["A1"]="SHEET_VISIBLE"; w.active["C3"]="OUTSIDE_PRINT"; w.active.print_area="A1:A1"; w.active.column_dimensions["A"].width=25; w.active.column_dimensions["C"].width=25
+    s=w.create_sheet("Hidden"); s["A1"]="SHEET_HIDDEN"; s.sheet_state="hidden"; s.column_dimensions["A"].width=25
     p=src/"sheets.xlsx"; w.save(p)
     pages,_=audit.render(p,work,None)
-    assert len(pages)==2 and all(s in "".join(x[1] for x in pages) for s in ("SHEET_VISIBLE","OUTSIDE_PRINT","SHEET_HIDDEN"))
+    assert len(pages)==2 and all(s in "".join(x[1] for x in pages) for s in ("SHEET_VISIBLE","OUTSIDE_PRINT","SHEET_HIDDEN")), [x[1] for x in pages]
     d=fitz.open(); d.new_page().insert_text((50,50),"PDF_AUDIT_123"); p=src/"pdf.pdf"; d.save(p); d.close()
     pages,_=audit.render(p,work,None); assert len(pages)==1 and "PDF_AUDIT_123" in pages[0][1]
     p=src/"image.png"; Image.new("RGB",(700,500),"white").save(p); pages,_=audit.render(p,work,None); assert len(pages)==1
