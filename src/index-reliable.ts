@@ -131,12 +131,12 @@ export default {
       });
     }
 
-    if (url.pathname !== "/mcp") {
+    if (url.pathname !== "/mcp" && url.pathname !== "/visual") {
       return oidcHandler.fetch(request, env, ctx);
     }
 
     const startedAt = Date.now();
-    const bodyPromise = request.clone().json().catch(() => null);
+    const bodyPromise = url.pathname === "/mcp" ? request.clone().json().catch(() => null) : Promise.resolve(null);
     const reliableEnv = buildReliableEnv(env, startedAt);
 
     try {
@@ -146,6 +146,7 @@ export default {
         "auditor_mcp_request_timeout",
       );
     } catch (error) {
+      if (url.pathname === "/visual") return Response.json({verdict:"verify",error:"visual_deadline"},{status:504,headers:{"Cache-Control":"no-store"}});
       return rpcFailureResponse(await bodyPromise, errorText(error));
     }
   },
