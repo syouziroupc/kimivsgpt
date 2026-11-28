@@ -1,20 +1,23 @@
 """Authenticated production image-only proof; never log the token."""
-import base64, hashlib, io, json, os, secrets, urllib.request, urllib.error
+import base64, hashlib, io, json, os, secrets, subprocess
 from PIL import Image, ImageDraw, ImageFont
 BASE="https://kimivsgpt.syouziroupc.workers.dev"
 TOKEN=os.environ["SMOKE_OIDC_TOKEN"]
 def post(path,payload,auth=True):
-    headers={"Content-Type":"application/json","Accept":"application/json, text/event-stream","MCP-Protocol-Version":"2025-03-26"}
-    if auth: headers["x-github-oidc"]=TOKEN
-    request=urllib.request.Request(BASE+path,data=json.dumps(payload).encode(),headers=headers,method="POST")
-    with urllib.request.urlopen(request,timeout=35) as response:
-        raw=response.read().decode()
-    try: return json.loads(raw)
+    cmd=["curl","--silent","--show-error","--max-time","35","--write-out","\\n%{http_code}","-H","Content-Type: application/json","-H","Accept: application/json, text/event-stream","-H","MCP-Protocol-Version: 2025-03-26"]
+    if auth: cmd+=["-H","x-github-oidc: "+TOKEN]
+    cmd+=["--data-binary","@-",BASE+path]
+    raw=subprocess.run(cmd,input=json.dumps(payload).encode(),stdout=subprocess.PIPE,check=True).stdout.decode()
+    body,status=raw.rsplit("\n",1)
+    status=int(status)
+    if not auth:
+        assert status==401,("unauthenticated request did not reach Worker OAuth challenge",path,status,body[:200])
+        return
+    assert status==200,("authenticated request failed",path,status,body[:300])
+    try: return json.loads(body)
     except ValueError:
-        return next(x for line in raw.splitlines() if line.startswith("data:") for x in [json.loads(line[5:])] if "id" in x)
-try: post("/visual",{},False)
-except urllib.error.HTTPError as e: assert e.code==401,e.code
-else: raise AssertionError("unauthenticated visual endpoint is open")
+        return next(x for line in body.splitlines() if line.startswith("data:") for x in [json.loads(line[5:])] if "id" in x)
+post("/visual",{},False)
 listed=post("/mcp",{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})
 tools={t["name"]:t for t in listed["result"]["tools"]}
 assert "review_strategy" in tools
