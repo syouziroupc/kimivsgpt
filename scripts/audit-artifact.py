@@ -32,6 +32,7 @@ def pdf_pages(path):
     with fitz.open(path) as doc:
         if doc.needs_pass or len(doc)==0: raise ValueError("encrypted or empty PDF")
         for page in doc:
+            if page.rect.width*page.rect.height*(160/72)**2 > 16_000_000: raise ValueError("rendered page exceeds pixel budget; supply explicit section render manifest")
             # Never clip the page; modest 160 DPI gives readable normal text.
             pix = page.get_pixmap(matrix=fitz.Matrix(160/72,160/72), alpha=False)
             findings=[]
@@ -46,7 +47,17 @@ def render_office(path, tmp):
     exe=shutil.which("soffice") or shutil.which("libreoffice")
     if not exe: raise RuntimeError("LibreOffice not installed or not on PATH")
     profile=(tmp/"lo-profile").as_uri()
-    subprocess.run([exe,"-env:UserInstallation="+profile,"--headless","--convert-to","pdf","--outdir",str(tmp),str(path)],check=True,timeout=120,capture_output=True)
+    ext=path.suffix.lower()
+    options={"UseLosslessCompression":{"type":"boolean","value":"true"}}
+    if ext in {".pptx",".odp"}:
+        filt="impress_pdf_Export"
+        options["ExportHiddenSlides"]={"type":"boolean","value":"true"}
+    elif ext in {".xlsx",".ods"}:
+        filt="calc_pdf_Export"
+        options["SinglePageSheets"]={"type":"boolean","value":"true"}
+    else: filt="writer_pdf_Export"
+    target="pdf:"+filt+":"+json.dumps(options,separators=(",",":"))
+    subprocess.run([exe,"-env:UserInstallation="+profile,"--headless","--convert-to",target,"--outdir",str(tmp),str(path)],check=True,timeout=120,capture_output=True)
     pdf=tmp/(path.stem+".pdf")
     if not pdf.is_file(): raise RuntimeError("Office conversion did not produce a PDF")
     pages=pdf_pages(pdf)
@@ -55,9 +66,16 @@ def render_office(path, tmp):
             root=ET.fromstring(z.read("ppt/presentation.xml"))
             ids=root.findall(".//{http://schemas.openxmlformats.org/presentationml/2006/main}sldId")
             if len(ids)!=len(pages): raise RuntimeError("PPTX slide count differs from rendered pages (including hidden slides)")
-    # PDF print views cannot prove coverage of unprinted spreadsheet cells.
-    if path.suffix.lower() in {".xlsx",".ods"}:
-        raise ValueError("Spreadsheet print-view coverage is not guaranteed; supply explicit rendered ranges using --manifest")
+    if ext==".xlsx":
+        with zipfile.ZipFile(path) as z:
+            root=ET.fromstring(z.read("xl/workbook.xml"))
+            count=len(root.findall(".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheet"))
+            if count!=len(pages): raise RuntimeError("XLSX sheet count differs from whole-sheet rendering")
+    if ext==".ods":
+        with zipfile.ZipFile(path) as z:
+            root=ET.fromstring(z.read("content.xml"))
+            count=len(root.findall(".//{urn:oasis:names:tc:opendocument:xmlns:office:1.0}spreadsheet/{urn:oasis:names:tc:opendocument:xmlns:table:1.0}table"))
+            if count!=len(pages): raise RuntimeError("ODS sheet count differs from whole-sheet rendering")
     return pages
 def web_pages(path):
     from playwright.sync_api import sync_playwright
@@ -114,7 +132,7 @@ def main():
     p=argparse.ArgumentParser()
     p.add_argument("artifact",type=pathlib.Path)
     p.add_argument("--requirements",required=True)
-    p.add_argument("--manifest",type=pathlib.Path,help="Verified producer render manifest (required for complete XLSX coverage)")
+    p.add_argument("--manifest",type=pathlib.Path,help="Verified producer render manifest for exact/large/unsupported layouts")
     p.add_argument("--output",required=True,type=pathlib.Path)
     p.add_argument("--max-pages",type=int,default=100)
     args=p.parse_args()

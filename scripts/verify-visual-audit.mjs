@@ -9,6 +9,7 @@ assert.throws(()=>trustedFileUrl("https://files.oaiusercontent.com.evil.test/a")
 assert.throws(()=>trustedFileUrl("http://files.oaiusercontent.com/a"));
 assert.equal(trustedFileUrl("https://files.oaiusercontent.com/a").hostname,"files.oaiusercontent.com");
 assert.throws(()=>parseVisualVote({response:"{}"}));
+assert.deepEqual(parseVisualVote({response:"```json\n"+JSON.stringify(vote)+"\n```"}),vote);
 const calls=[];
 const ok=await auditVisualPage({run:async(model,input)=>{calls.push(model);assert.ok(input.messages[1].content[1].image_url.url.startsWith("data:image/png;base64,"));return {response:JSON.stringify(vote)};}},page,png,Date.now()+2000);
 assert.equal(ok.verdict,"proceed");assert.equal(ok.coverage.valid,2);assert.deepEqual(calls,VISUAL_MODELS.slice(0,2));

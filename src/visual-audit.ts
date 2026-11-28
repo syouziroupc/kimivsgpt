@@ -116,7 +116,7 @@ async function readLimited(response:{body:ReadableStream<Uint8Array>|null;header
 export function parseVisualVote(raw:unknown):Vote {
   const r=raw as any;
   let value=r?.response??r?.choices?.[0]?.message?.content??r;
-  if(typeof value==="string")value=JSON.parse(value.trim().replace(/^`(?:json)?\s*|\s*`+$/gi,""));
+  if(typeof value==="string")value=JSON.parse(value.trim().replace(/^`+(?:json)?\s*|\s*`+$/gi,""));
   const vote=voteSchema.parse(value);
   if(vote.verdict==="proceed"&&vote.issues.length)throw new Error("invalid_vote");
   if(vote.verdict==="revise"&&!vote.issues.length)throw new Error("invalid_vote");
@@ -133,7 +133,7 @@ export async function auditVisualPage(ai:AI,page:Omit<Page,"image_base64">,bytes
     const pending=new Set<string>();const results:ModelReview[]=[];
     await new Promise<void>(resolve=>{
       let done=false;let timer:ReturnType<typeof setTimeout>|undefined;let hedge:ReturnType<typeof setTimeout>|undefined;
-      const finish=()=>{if(done)return;done=true;clearTimeout(timer);clearTimeout(hedge);for(const model of pending)results.push({model,status:"failed",error:"deadline_or_superseded"});resolve();};
+      const finish=()=>{if(done)return;done=true;if(timer!==undefined)clearTimeout(timer);if(hedge!==undefined)clearTimeout(hedge);for(const model of pending)results.push({model,status:"failed",error:"deadline_or_superseded"});resolve();};
       const valid=()=>results.filter(r=>r.status==="ok").length;
       const launch=(model:string)=>{
         if(done||pending.has(model)||results.some(r=>r.model===model)||deadline-Date.now()<750)return;
