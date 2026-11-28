@@ -100,3 +100,7 @@ The external critic must never be used to draft the user's answer, write code, p
 Limited web verification is a bounded evidence check, not permission for autonomous research loops. Keep search and model calls separately bounded so a single answer cannot trigger an uncontrolled cost cascade.
 
 Do not send secrets, credentials, unnecessary personal data, large file contents, full codebases, long conversation history, or hidden chain-of-thought.
+
+## Mandatory artifact inspection
+
+For visual deliverables (PPTX, PDF, DOCX, XLSX, HTML, SVG and images), render the final artifact in the production environment. Audit each actual page using review_visual_page when a genuine file reference is available, or use scripts/audit-artifact.py from a trusted authenticated local environment. Keep review_strategy for text/logic only. Never substitute a textual summary or fabricated URL for an image. Never place secrets in tool arguments. All pages must match the final artifact hash and return complete coverage and proceed. A failed render, unsupported file transfer, omitted page, unresolved defect, or incomplete result is verification pending, not a pass. Fix defects and rerender affected pages; final submission requires a fresh complete page manifest tied to the final artifact. Do not promise successful visual inspection if the host cannot deliver bytes. External visual inspection is separate from the one text review limit. Never send confidential images unless authorized.

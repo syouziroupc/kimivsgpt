@@ -13,7 +13,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "cf-typegen": "wrangler types",
     "test:concurrency": "node scripts/verify-concurrency-contract.mjs",
-    "test:reliability": "node scripts/verify-reliability-contract.mjs"
+    "test:reliability": "node scripts/verify-reliability-contract.mjs && node --experimental-strip-types scripts/verify-visual-audit.mjs && python3 -m py_compile scripts/audit-artifact.py"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",

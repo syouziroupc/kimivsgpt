@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   deploy:
@@ -45,7 +46,8 @@ jobs:
           for i in {1..18}; do
             body="$(curl --fail --silent --show-error --max-time 15 https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"version":"0.11.0-resilient-panel"' \
+            if printf '%s' "$body" | grep -q '"version":"0.12.0-artifact-audit"' \
+              && printf '%s' "$body" | grep -q '"visual_audit":{"enabled":true' \
               && printf '%s' "$body" | grep -q '"application_quota":"none"' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
               && printf '%s' "$body" | grep -q '"rpc_error_fallback":true'; then
@@ -55,3 +57,17 @@ jobs:
           done
           echo 'Production health did not reach expected reliable version.' >&2
           exit 1
+
+      - name: Acquire short-lived OIDC token for synthetic visual proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          token_json="$(curl --fail --silent --show-error -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=kimivsgpt-hotfix-smoke")"
+          token="$(printf '%s' "$token_json" | python -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          test -n "$token"
+          echo "::add-mask::$token"
+          echo "SMOKE_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
+      - name: Real visual model smoke test
+        run: |
+          python -m pip install Pillow
+          python scripts/live-visual-smoke.py

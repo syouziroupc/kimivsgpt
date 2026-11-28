@@ -3,7 +3,7 @@ import oidcHandler, { AuthState } from "./index-oidc-smoke";
 export { AuthState };
 
 import { candidateModels, PANEL, RESERVE_MODELS } from "./model-policy";
-const VERSION = "0.11.0-resilient-panel";
+const VERSION = "0.12.0-artifact-audit";
 const MODEL_CALL_TIMEOUT_MS = 23000;
 const INFERENCE_BUDGET_MS = 24500;
 const MCP_REQUEST_DEADLINE_MS = 28000;
@@ -117,6 +117,7 @@ export default {
         application_quota: "none",
         review_rate_limit: "none",
         auth_rate_limit: "enabled",
+        visual_audit: { enabled:true, required_votes:2, max_image_bytes:2097152, direct_endpoint:"/visual", mcp_tool:"review_visual_page" },
         reliability: {
           per_model_timeout_ms: MODEL_CALL_TIMEOUT_MS,
           inference_budget_ms: INFERENCE_BUDGET_MS,
@@ -131,12 +132,12 @@ export default {
       });
     }
 
-    if (url.pathname !== "/mcp") {
+    if (url.pathname !== "/mcp" && url.pathname !== "/visual") {
       return oidcHandler.fetch(request, env, ctx);
     }
 
     const startedAt = Date.now();
-    const bodyPromise = request.clone().json().catch(() => null);
+    const bodyPromise = url.pathname === "/mcp" ? request.clone().json().catch(() => null) : Promise.resolve(null);
     const reliableEnv = buildReliableEnv(env, startedAt);
 
     try {
@@ -146,6 +147,7 @@ export default {
         "auditor_mcp_request_timeout",
       );
     } catch (error) {
+      if (url.pathname === "/visual") return Response.json({verdict:"verify",error:"visual_deadline"},{status:504,headers:{"Cache-Control":"no-store"}});
       return rpcFailureResponse(await bodyPromise, errorText(error));
     }
   },

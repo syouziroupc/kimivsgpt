@@ -29,9 +29,10 @@ interface Env {
 import { candidateModels, modelInput, PANEL, DEEP_MODEL, FRONTIER_MODELS, FRONTIER_RESERVE, ECONOMY_RESERVE } from "./model-policy";
 import { runPanel } from "./panel-runner";
 import { aggregatePanel } from "./panel";
+import { visualFileSchema, visualResultSchema, reviewVisualFile, reviewVisualRequest } from "./visual-audit";
 // The input schema permits more than 5,000 chars. Retain all accepted fields, including escaped JSON.
 const MAX_PACKET_CHARS = 48000;
-const VERSION = "0.11.0-resilient-panel";
+const VERSION = "0.12.0-artifact-audit";
 
 const ISSUE_TYPES = [
   "anchoring",
@@ -362,6 +363,16 @@ function createServer(env: Env) {
     },
   );
 
+  server.registerTool("review_visual_page", {
+    description: "Independently audit one actual rendered PNG/JPEG page of a PPTX, PDF, DOCX, XLSX, HTML, SVG or image. Supply the real image, never a description in its place. Repeat for every page; only complete proceed results may pass.",
+    inputSchema: visualFileSchema,
+    outputSchema: visualResultSchema,
+    annotations: {readOnlyHint:true, openWorldHint:false, destructiveHint:false},
+    _meta: {"openai/fileParams":["image"]},
+  }, async (input) => {
+    const result = await reviewVisualFile(env.AI, visualFileSchema.parse(input), Math.min(env.AUDITOR_DEADLINE_AT ?? Date.now()+23500, Date.now()+23500)-250);
+    return {structuredContent:result,content:[{type:"text" as const,text:JSON.stringify(result)}]};
+  });
   return server;
 }
 
@@ -384,6 +395,12 @@ export default {
         application_quota: "none",
         response_guarantee: "schema-valid review_strategy result",
       });
+    }
+
+    if (url.pathname === "/visual") {
+      const origin=originOf(request);
+      if (!(await isMcpAuthorized(request, env, origin))) return oauthUnauthorized(origin);
+      return reviewVisualRequest(env.AI,request,Math.min(env.AUDITOR_DEADLINE_AT ?? Date.now()+23500,Date.now()+23500)-250);
     }
 
     if (url.pathname !== "/mcp") {

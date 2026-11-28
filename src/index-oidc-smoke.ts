@@ -57,7 +57,7 @@ async function verifyGitHubOidc(jwt: string): Promise<boolean> {
 export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/mcp") {
+    if (url.pathname === "/mcp" || url.pathname === "/visual") {
       const oidc = request.headers.get("x-github-oidc") || "";
       if (oidc && await verifyGitHubOidc(oidc)) {
         const headers = new Headers(request.headers);

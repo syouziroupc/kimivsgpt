@@ -30,3 +30,7 @@ Processing relies on Cloudflare infrastructure and Cloudflare Workers AI. No sep
 
 Support and privacy questions can be submitted through the project repository:
 https://github.com/syouziroupc/kimivsgpt/issues
+
+## Optional visual artifact inspection
+
+The separate visual audit tool accepts page renders and minimal associated text/structure only with authorization. Actual images are sent to the designated Cloudflare vision models (Gemma 4, Llama 4 Scout and Qwen fallback). No image is intentionally persisted by the application; infrastructure telemetry policies still apply. Do not submit confidential images without authorization. The worker does not log image bytes or signed download URLs. The original artifact is rendered locally by the producer.

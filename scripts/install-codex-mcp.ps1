@@ -17,7 +17,7 @@ $begin
 url = "https://kimivsgpt.syouziroupc.workers.dev/mcp"
 auth = "oauth"
 required = false
-enabled_tools = ["review_strategy"]
+enabled_tools = ["review_strategy", "review_visual_page"]
 default_tools_approval_mode = "approve"
 tool_timeout_sec = 45
 $end
